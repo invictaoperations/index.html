@@ -1,0 +1,3033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invicta Cyber Solutions</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#00ff00">
+
+<!-- Versioning info for LMS/SCORM -->
+<meta name="course-version" content="2.0-full">
+<meta name="course-id" content="invicta-cyber-solutions">
+<meta name="scorm-compatible" content="1.2,2004">
+
+<style>
+/* Basic resets and colors */
+*{box-sizing:border-box}
+:root{--g:#00ff00;--r:#ff0000;--b:#00d5ff}
+body{margin:0;background:#000;color:var(--g);font-family:"Courier New",monospace;font-size:14px}
+
+/* Layout */
+header{text-align:center;padding:18px;font-size:2rem;border-bottom:2px solid var(--g);position:sticky;top:0;background:rgba(0,0,0,.85);z-index:5}
+nav{display:flex;justify-content:center;gap:10px;padding:10px;border-bottom:1px solid #006400;background:rgba(0,32,0,.8);position:sticky;top:74px;z-index:5}
+/* Adjust navigation and primary button size for a sleeker look */
+nav button,button.primary{
+  background:#000;
+  color:var(--g);
+  border:1px solid var(--g);
+  padding:6px 10px;
+  border-radius:10px;
+  cursor:pointer;
+  font-size:0.85rem;
+}
+main{padding:16px;max-width:1180px;margin:0 auto}
+
+/* Cards and lists */
+.card{border:1px solid var(--g);border-radius:14px;padding:14px;margin-bottom:14px;background:rgba(0,32,0,.65);box-shadow:0 0 10px rgba(0,128,0,.3)}
+.lesson{padding:10px 0;border-bottom:1px dashed var(--g);cursor:pointer}
+.lesson:last-child{border-bottom:none}
+.locked{opacity:.5;cursor:not-allowed}
+.terminal{background:#000;border:1px solid var(--g);padding:10px;height:190px;overflow:auto;margin-top:10px;border-radius:12px}
+.term{width:100%;background:#000;color:var(--g);border:1px solid var(--g);padding:8px;border-radius:12px}
+.completed{color:#00ffff;font-weight:bold}
+.badge{font-size:12px;border:1px solid var(--g);padding:2px 8px;border-radius:999px}
+.badge.lab{border-color:#00ffff;color:#00ffff}
+.badge.lock{border-color:var(--r);color:#ff9a9a}
+.badge.free{border-color:var(--g)}
+canvas{position:fixed;inset:0;z-index:-1}
+
+/* Diagram styling: images shown inside lessons */
+.diagram{
+  max-width:100%;
+  border:1px solid var(--g);
+  border-radius:8px;
+  margin:10px 0;
+}
+
+/* Preserve line breaks and spacing in lesson narratives */
+.lesson-text{
+  white-space:pre-wrap;
+  line-height:1.5;
+  margin-bottom:1em;
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="matrix"></canvas>
+
+<header>Invicta Cyber Solutions</header>
+
+<nav>
+  <button onclick="route('home')">Home</button>
+  <button onclick="route('index')">Index</button>
+  <button onclick="route('courses')">Courses</button>
+  <button onclick="route('profile')">Profile</button>
+  <button onclick="route('standards')">Standards</button>
+</nav>
+
+<main id="app"></main>
+
+<script>
+/* =========================================================
+   MATRIX RAIN BACKGROUND
+   Creates green "Matrix" style rain across the canvas.
+========================================================= */
+const c=document.getElementById("matrix"),ctx=c.getContext("2d");
+function resize(){c.width=innerWidth;c.height=innerHeight}
+resize();addEventListener("resize",resize);
+const letters = "01ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const font = 14;
+let drops = Array(Math.floor(c.width / font)).fill(1);
+// Use multiple colours for the rain effect
+const rainColors = ["#00ff00", "#00ffff", "#ff00ff", "#ffff00", "#ff6600"];
+setInterval(() => {
+  ctx.fillStyle = "rgba(0,0,0,.06)";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.font = font + "px monospace";
+  drops.forEach((y, i) => {
+    // Pick a random colour for each glyph
+    ctx.fillStyle = rainColors[Math.floor(Math.random() * rainColors.length)];
+    ctx.fillText(letters[(Math.random() * letters.length) | 0], i * font, y * font);
+    if (y * font > c.height && Math.random() > 0.985) drops[i] = 0;
+    drops[i]++;
+  });
+}, 33);
+
+/* =========================================================
+   HELPER FUNCTIONS AND STATE
+========================================================= */
+const app=document.getElementById("app");
+const esc=s=>String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
+const pill=(t,c)=>`<span class="badge ${c||''}">${esc(t)}</span>`;
+
+// Persistent state for progress, lab scores, exam scores, certificates and subscription tier.
+const KEY="matrix_state_complete";
+let state=JSON.parse(localStorage.getItem(KEY))||{
+  progress:{},
+  labScores:{},
+  examScores:{},
+  certificates:[],
+  subscription:{tier:"free"}
+};
+const save=()=>localStorage.setItem(KEY,JSON.stringify(state));
+
+/* =========================================================
+   PYTHON FUN LAB STATE AND FUNCTIONS
+   Interactive tasks for Python lessons. Each task includes
+   a description and a regular expression to match user input.
+   Correct input will progress to the next task.
+========================================================= */
+const pyFunState = {
+  index: 0,
+  tasks: [
+    {
+      desc: "Task 1: Print 'Hello, World!'\nWrite a Python statement that prints the message Hello, World! to the console.",
+      regex: /^\s*print\(['"]Hello, World!['"]\)\s*$/i
+    },
+    {
+      desc: "Task 2: Add Two Numbers\nDefine variables a and b with integer values and print their sum.",
+      regex: /^\s*a\s*=\s*\d+\s*;?\s*b\s*=\s*\d+\s*;?\s*print\(\s*a\s*\+\s*b\s*\)\s*$/i
+    },
+    {
+      desc: "Task 3: Iterate Through a List\nCreate a list of three numbers and use a for loop to print each element.",
+      regex: /^\s*lst\s*=\s*\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]\s*;?\s*for\s+\w+\s+in\s+lst\s*:\s*print\(\s*\w+\s*\)\s*$/i
+    },
+    {
+      desc: "Task 4: Write an Even Check Function\nWrite a function called is_even that returns True if a number is even, and False otherwise. Then call it with a number.",
+      regex: /^\s*def\s+is_even\s*\(\s*\w+\s*\)\s*:\s*return\s+\w+\s*%\s*2\s*==\s*0\s*\n+\s*print\(\s*is_even\s*\(\s*\d+\s*\)\s*\)\s*$/i
+    },
+    {
+      desc: "Task 5: Use List Comprehension\nCreate a list of squares from 1 to 5 using a list comprehension.",
+      regex: /^\s*print\(\s*\[\s*x\s*\*\s*x\s*for\s+x\s+in\s+range\(\s*1\s*,\s*6\s*\)\s*\]\s*\)\s*$/i
+    },
+    {
+      desc: "Task 6: Define a Class\nDefine a class Person with an __init__ method taking name and age, then create an instance and print the name.",
+      regex: /^\s*class\s+Person\s*:\s*\n\s*def\s+__init__\(\s*self\s*,\s*name\s*,\s*age\s*\)\s*:\s*\n\s*self\.name\s*=\s*name\s*\n\s*self\.age\s*=\s*age\s*\n+\s*p\s*=\s*Person\(\s*['"][^'"]+['"]\s*,\s*\d+\s*\)\s*\n\s*print\(\s*p\.name\s*\)\s*$/i
+    }
+  ]
+};
+
+// Map legacy Python Fun helper functions to the primary Python task functions
+function displayPyFunTask() {
+  // Delegate to the unified Python task renderer
+  displayPythonTask();
+}
+
+function evaluatePyFun(input) {
+  // Delegate to the primary Python evaluator
+  evaluatePython(input);
+}
+
+function nextPyFunTask() {
+  // Delegate to the primary skip handler
+  nextPythonTask();
+}
+
+/* =========================================================
+   FULL CURRICULUM DEFINITION
+   Courses, lessons, lab definitions and exam questions.
+   This mirrors the source curriculum provided and adds
+   lab regex patterns for grading. Feel free to add more
+   subjects here – the logic below will handle them.
+========================================================= */
+const COURSES=[
+  {
+    title:"Cybersecurity Foundations",
+    track:"Fundamentals",
+    level:"Beginner",
+    alignment:["NICE-PR","NICE-AN"],
+    ceu:3,
+    lessons:[
+      { title:"CIA Triad", key:"cia",
+        theory:"Confidentiality, integrity and availability form the core of information security. Confidentiality restricts data access to authorized users; integrity ensures data is accurate and unaltered; availability ensures authorized users can access information when needed.",
+        videos:[
+          { title:"CIA Triad Explained", url:"https://www.youtube.com/watch?v=mv_RTVu4ApI" },
+          { title:"Information Security Basics", url:"https://www.youtube.com/watch?v=27AVect2gkM" }
+        ],
+        pdfs:[
+          { title:"NIST SP 800-12r1 Guide to Information Security", url:"https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-12r1.pdf" },
+          { title:"Information Security Triad – Pressbooks", url:"https://ecampusontario.pressbooks.pub/infosys/chapter/9-1-the-information-security-triad/" }
+        ],
+        objectives:[
+          "Define confidentiality, integrity and availability",
+          "Describe real-world examples for each principle",
+          "Explain the importance of balancing the CIA triad in system design"
+        ]
+      },
+      { title:"Intermediate Security Controls", key:"intsec",
+        theory:"Secure network design uses layers of defense such as firewalls, encryption, tunneling, honeypots, network sniffers and operating system hardening. Logging, patching, antivirus and antimalware tools support defense in depth. Intrusion detection and prevention systems (IDS/IPS) monitor traffic to identify and prevent attacks.",
+        videos:[
+          { title:"Firewalls, IDS & IPS Explained", url:"https://www.youtube.com/watch?v=W2p0ouhZX3s" },
+          { title:"Logging and Monitoring Fundamentals", url:"https://www.youtube.com/watch?v=tVaQ1luGUUI" }
+        ],
+        pdfs:[
+          { title:"NIST SP 800-92: Guide to Computer Security Log Management", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+          { title:"NIST SP 800-94: Guide to Intrusion Detection and Prevention Systems", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-94.pdf" },
+          { title:"Defense in Depth Strategies (DOE)", url:"https://energy.gov/sites/prod/files/oeprod/DocumentsandMedia/Defense_in_Depth_Strategies.pdf" }
+        ],
+        objectives:[
+          "Design a secure network using firewalls, encryption and tunneling",
+          "Differentiate intrusion detection systems from intrusion prevention systems",
+          "Explain how logging, patching and antimalware tools support defense in depth"
+        ]
+      },
+      {
+        title:"Pentesting Lab",
+        key:"pentest",
+        theory:"Penetration testing simulates an attack to identify exploitable vulnerabilities in systems. It begins with defining the scope, proceeds through reconnaissance and scanning, gains access to systems, maintains access, covers tracks and ends with reporting the findings.",
+        videos:[
+          { title:"Penetration Testing for Beginners", url:"https://www.youtube.com/watch?v=hh0TU2i6-Ew" },
+          { title:"Metasploit Tutorial Basics", url:"https://www.youtube.com/watch?v=tVqWcru0wa0" }
+        ],
+        pdfs:[
+          { title:"NIST SP 800-115: Technical Guide to Information Security Testing and Assessment", url:"https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-115.pdf" },
+          { title:"OWASP Web Security Testing Guide", url:"https://owasp.org/www-project-web-security-testing-guide/" }
+        ],
+        objectives:[
+          "Explain the purpose and goals of penetration testing",
+          "Describe the phases of a penetration test: planning, reconnaissance, exploitation, post-exploitation and reporting",
+          "Execute a simulated penetration test using the provided lab environment"
+        ],
+        type:"lab",
+        lab:{
+          max:13,
+          steps:[
+            {id:"scope", points:4, regex:/^scope$/i, passMsg:"Scope confirmed (simulated)."},
+            {id:"recon", points:3, regex:/^recon$/i, passMsg:"Recon checklist completed (simulated)."},
+            {id:"exploit", points:3, regex:/^exploit$/i, passMsg:"Exploitation simulated."},
+            {id:"pivot", points:2, regex:/^pivot$/i, passMsg:"Pivoting simulated."},
+            {id:"report", points:3, regex:/^report$/i, passMsg:"Findings recorded (simulated)."}
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"Which protects data from disclosure?", a:["Integrity","Confidentiality","Availability"], c:1 },
+      { q:"IDS is used for?", a:["Detection","Encryption","Access"], c:0 }
+    ]
+  },
+  {
+    title:"Application Development",
+    track:"Development",
+    level:"Beginner",
+    alignment:["NICE-SE"],
+    ceu:3,
+    lessons:[
+      { title:"Web App Basics", key:"webdev",
+        theory:"HTML stands for HyperText Markup Language and is the coded language used to build web pages. It defines the structure of a web page using elements such as headings, paragraphs, lists and links, and you can embed multimedia such as images and videos.",
+        videos:[
+          { title:"HTML Basics Crash Course", url:"https://www.youtube.com/watch?v=UB1O30fR-EE" },
+          { title:"Introduction to HTML", url:"https://www.youtube.com/watch?v=pQN-pnXPaVg" }
+        ],
+        pdfs:[
+          { title:"Mozilla Developer Network HTML Guide", url:"https://developer.mozilla.org/en-US/docs/Web/HTML" },
+          { title:"HTML/CSS Lecture Notes (Stony Brook University)", url:"https://www3.cs.stonybrook.edu/~pfodor/courses/CSE316/L03-HTML_CSS.pdf" }
+        ],
+        objectives:[
+          "Explain what HTML stands for and its role in creating web pages",
+          "Construct a simple web page using headings, paragraphs, lists and links",
+          "Embed images and videos within a web page"
+        ]
+      },
+      { title:"Intermediate JavaScript Patterns", key:"intjs",
+        theory:"JavaScript patterns such as closures, modules and asynchronous functions help structure and manage complex code. A closure pairs a function with its lexical environment so that it can access outer variables. Modules separate code into reusable units. Async functions return promises and the await keyword pauses execution until the promise is resolved, providing a cleaner syntax for asynchronous operations.",
+        videos:[
+          { title:"Understanding Closures in JavaScript", url:"https://www.youtube.com/watch?v=Q02fBrg1nB0" },
+          { title:"Async/Await in JavaScript", url:"https://www.youtube.com/watch?v=vn3tm0quoqE" }
+        ],
+        pdfs:[
+          { title:"JavaScript: The Good Parts (PDF)", url:"http://sd.blackball.lv/library/JavaScript:_The_Good_Parts_(2008).pdf" },
+          { title:"You Dont Know JS Yet", url:"https://github.com/getify/You-Dont-Know-JS" }
+        ],
+        objectives:[
+          "Use closures to create private state and encapsulate functionality",
+          "Organize code using module patterns",
+          "Implement asynchronous workflows using promises and async/await"
+        ]
+      },
+      {
+        title:"Mini App Builder Lab",
+        key:"appbuilder",
+        theory:"This lab guides you through building a complete mini web application using HTML for structure, CSS for styling and JavaScript for interactivity. You'll design a user interface, implement event-driven logic and deploy your app in a sandbox environment.",
+        videos:[
+          { title:"Build a To‑Do List App", url:"https://www.youtube.com/watch?v=Ttf3CEsEwMQ" },
+          { title:"JavaScript Project: Weather App", url:"https://www.youtube.com/watch?v=KqZGuzrY9D4" }
+        ],
+        pdfs:[
+          { title:"Eloquent JavaScript (Book)", url:"https://eloquentjavascript.net/Eloquent_JavaScript.pdf" },
+          { title:"Frontend Developer Handbook", url:"https://static.frontendmasters.com/bootcamp/submission/t7geli9d7r/front-end-handbook-2019.pdf" }
+        ],
+        objectives:[
+          "Design and build a simple interactive web application",
+          "Use event listeners to respond to user actions",
+          "Test and deploy your application within the sandbox environment"
+        ],
+        type:"lab",
+        lab:{ max:6, steps:[
+          { id:"html", points:3, regex:/html/i, passMsg:"HTML added." },
+          { id:"js", points:3, regex:/function/i, passMsg:"JS added." }
+        ] }
+      }
+    ],
+    exam:[
+      { q:"Which handles layout?", a:["HTML","CSS","JS"], c:1 },
+      { q:"`async/await` is mainly for?", a:["Blocking UI","Handling async work","Defining CSS"], c:1 }
+    ]
+  },
+  {
+    title:"Reverse Engineering",
+    track:"Analysis",
+    level:"Intermediate",
+    alignment:["NICE-AN","NICE-OP"],
+    ceu:3,
+    lessons:[
+      { title:"Static Analysis", key:"re",
+        theory:"Static analysis examines malware or software without executing it. By inspecting the code, file structure and strings, analysts can understand what the program does and identify malicious indicators while avoiding the risk of execution.",
+        videos:[
+          { title:"Introduction to Reverse Engineering", url:"https://www.youtube.com/watch?v=06sB_Ht5j4o" },
+          { title:"Static Malware Analysis with Ghidra", url:"https://www.youtube.com/watch?v=w0zf0tr4fkc" }
+        ],
+        pdfs:[
+          { title:"Ghidra Software Reverse Engineering for Beginners", url:"https://ghidra-sre.org/Ghidra-RE.pdf" },
+          { title:"Practical Malware Analysis (Sample)", url:"https://nostarch.com/download/samples/Practical_Malware_Analysis_Sample.pdf" }
+        ],
+        objectives:[
+          "Distinguish between static and dynamic analysis",
+          "Use disassembly tools to inspect binaries without running them",
+          "Extract strings and metadata to infer program behaviour"
+        ]
+      },
+      { title:"Malware Analysis Basics", key:"mal",
+        theory:"Malware analysis seeks to understand how malicious software works in order to defend against it. Analysts study both static and dynamic behaviours, identify indicators of compromise, and contribute to threat intelligence and incident response.",
+        videos:[
+          { title:"Malware Analysis for Beginners", url:"https://www.youtube.com/watch?v=fYY7q2JW6Eg" },
+          { title:"Dynamic Malware Analysis", url:"https://www.youtube.com/watch?v=kpOvxdTESe4" }
+        ],
+        pdfs:[
+          { title:"Beginner’s Guide to Malware Analysis", url:"https://www.exploit-db.com/docs/english/15587-malware-analysis-beginners.pdf" },
+          { title:"NIST SP 800-115 (Security Testing Guide)", url:"https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-115.pdf" }
+        ],
+        objectives:[
+          "Explain why malware analysis is important for security professionals",
+          "Describe the differences between static and dynamic analysis techniques",
+          "Safely analyse malicious code in a controlled environment and extract indicators"
+        ]
+      }
+    ],
+    exam:[
+      { q:"Static analysis runs code?", a:["Yes","No"], c:1 },
+      { q:"IOCs are used to?", a:["Identify indicators","Compress files","Draw UI"], c:0 }
+    ]
+  },
+  {
+    title:"Web Exploitation & Network Attacks",
+    track:"Attacks",
+    level:"Intermediate",
+    alignment:["NICE-AN","NICE-PR"],
+    ceu:4,
+    tier:"pro",
+    lessons:[
+      { title:"OWASP Top 10", key:"owasp",
+        theory:"The OWASP Top 10 is a standard awareness document that ranks the most critical web application security risks. It highlights vulnerabilities such as injection, broken authentication, sensitive data exposure and cross-site scripting, and encourages developers to adopt secure coding practices to mitigate them.",
+        videos:[
+          { title:"OWASP Top 10 Explained", url:"https://www.youtube.com/watch?v=H8-Yu8l_gZg" },
+          { title:"Top 10 Web Vulnerabilities in 2023", url:"https://www.youtube.com/watch?v=UZkvJREwcXU" }
+        ],
+        pdfs:[
+          { title:"OWASP Top Ten 2021 PDF", url:"https://owasp.org/www-project-top-ten/OWASP_Top_Ten_2021.pdf" },
+          { title:"OWASP Cheat Sheet Series", url:"https://cheatsheetseries.owasp.org" }
+        ],
+        objectives:[
+          "List the OWASP Top 10 vulnerabilities and explain their impact",
+          "Identify common causes of each vulnerability in real applications",
+          "Apply secure coding practices and mitigation strategies"
+        ]
+      },
+      { title:"DNS & IP Enumeration", key:"dns",
+        theory:"DNS enumeration is the process of discovering DNS records and infrastructure for a target domain. Attackers use passive reconnaissance, active queries with tools like dig and host, zone transfers, subdomain brute forcing and reverse DNS to map an organization's network. Defenders restrict zone transfers and separate internal and external DNS zones to mitigate enumeration.",
+        videos:[
+          { title:"DNS Enumeration Tutorial", url:"https://www.youtube.com/watch?v=z5ncjQ2__q4" },
+          { title:"Subdomain Enumeration Tools", url:"https://www.youtube.com/watch?v=W8VXXCSkGRc" }
+        ],
+        pdfs:[
+          { title:"Practical DNS Security Guide", url:"https://www.sans.org/reading-room/practical-dns-security.pdf" },
+          { title:"DNS Enumeration Cheat Sheet", url:"https://highon.coffee/blog/dns-enumeration-cheat-sheet/" }
+        ],
+        objectives:[
+          "Explain what DNS enumeration is and why it is important for attackers and defenders",
+          "Use tools such as dig and host to perform basic DNS queries and zone transfers",
+          "Implement preventive measures such as access controls and external/internal zone separation"
+        ]
+      },
+      { title:"Authentication Logic Flaws", key:"auth",
+        theory:"Authentication vulnerabilities arise when applications incorrectly implement login or session management, allowing attackers to gain unauthorized access to sensitive data. Understanding how authentication mechanisms work and recognizing flaws in logic, such as insecure password resets or missing account lockouts, helps prevent breaches.",
+        videos:[
+          { title:"Broken Authentication Explained", url:"https://www.youtube.com/watch?v=ZCEhwu3oM6o" },
+          { title:"Authentication Bypass Vulnerabilities", url:"https://www.youtube.com/watch?v=sWvpdcYpDrE" }
+        ],
+        pdfs:[
+          { title:"OWASP Authentication Cheat Sheet", url:"https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html" },
+          { title:"OWASP Session Management Cheat Sheet", url:"https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html" }
+        ],
+        objectives:[
+          "Recognize common authentication and session management vulnerabilities",
+          "Assess login, password reset and multi-factor flows for weaknesses",
+          "Implement secure authentication, password policies and session controls"
+        ]
+      },
+      {
+        title:"XSS Defense Lab (Simulated)",
+        key:"xss",
+        theory:"Cross-Site Scripting (XSS) is an injection vulnerability where malicious scripts are executed in a victim's browser. It occurs when untrusted input is incorporated into web pages without proper validation and output encoding. Defenses include input validation, output encoding and content security policies.",
+        videos:[
+          { title:"Cross-Site Scripting Explained", url:"https://www.youtube.com/watch?v=s-5FqgPD-5w" },
+          { title:"Preventing XSS Attacks", url:"https://www.youtube.com/watch?v=RBMGRcnl1EI" }
+        ],
+        pdfs:[
+          { title:"OWASP Testing Guide v4 – XSS", url:"https://owasp.org/www-pdf-archive/OTGv4.pdf" },
+          { title:"Cross Site Scripting Prevention Cheat Sheet", url:"https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html" }
+        ],
+        objectives:[
+          "Describe how XSS vulnerabilities occur and the difference between stored, reflected and DOM XSS",
+          "Encode untrusted output to prevent XSS",
+          "Implement input validation and Content Security Policy (CSP) directives to mitigate XSS"
+        ],
+        type:"lab",
+        lab:{
+          max:13,
+          steps:[
+            { id:"encode", points:5, regex:/^encode\s+<script>$/i, passMsg:"Encoded output safely (simulated)." },
+            { id:"sink", points:5, regex:/^fix\s+sink$/i, passMsg:"Sink fixed with output encoding." },
+            { id:"sanitize", points:3, regex:/^sanitize$/i, passMsg:"Input sanitized." }
+          ]
+        }
+      },
+      {
+        title:"CSRF & App Abuse (Simulated)",
+        key:"csrf",
+        theory:"Cross-Site Request Forgery (CSRF) forces a victim's browser to submit unwanted actions on a web application in which the user is authenticated. Attackers use social engineering to trick victims into sending state-changing requests; if the victim is an administrator the entire application can be compromised. Mitigations include anti-CSRF tokens and using SameSite cookies.",
+        videos:[
+          { title:"CSRF Explained", url:"https://www.youtube.com/watch?v=j85EeYJ0IaA" },
+          { title:"Preventing CSRF Attacks with Tokens", url:"https://www.youtube.com/watch?v=Ds4_2wC2Eeo" }
+        ],
+        pdfs:[
+          { title:"OWASP CSRF Prevention Cheat Sheet", url:"https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Request_Forgery_Prevention_Cheat_Sheet.html" },
+          { title:"OWASP Testing Guide v4", url:"https://owasp.org/www-pdf-archive/OWASP_Testing_Guide_v4.pdf" }
+        ],
+        objectives:[
+          "Understand how CSRF exploits the victim's authenticated session to perform unauthorized actions",
+          "Implement anti-CSRF tokens and SameSite cookie attributes to prevent CSRF",
+          "Recognize when user interface redressing and social engineering are used for CSRF"
+        ],
+        type:"lab",
+        lab:{
+          max:13,
+          steps:[
+            { id:"token", points:5, regex:/^token\s+invalid$/i, passMsg:"CSRF blocked (token invalid)." },
+            { id:"same", points:5, regex:/^add\s+samesite$/i, passMsg:"Mitigation applied: SameSite cookie." },
+            { id:"double", points:3, regex:/^double$/i, passMsg:"Double-submit cookie implemented." }
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"XSS is caused by?", a:["Encryption","Untrusted output","Auth"], c:1 },
+      { q:"CSRF abuses?", a:["Trusted browser session","Disk encryption","Hashing"], c:0 }
+    ]
+  },
+  {
+    title:"Blue Team / Defensive Security",
+    track:"Blue Team & IR",
+    level:"Intermediate",
+    alignment:["NICE-PR","NICE-OM"],
+    ceu:3,
+    lessons:[
+      {
+        title:"Detection & Alerting Lab",
+        key:"detect",
+        theory:"Detection and alerting involve monitoring systems and networks for suspicious activity, triaging events and classifying alerts. Effective alerting depends on tuned detection rules, correlation of log data and timely escalation of high-priority incidents.",
+        videos:[
+          { title:"Security Event Triage & Alerting", url:"https://www.youtube.com/watch?v=0cH2QhGVIJw" },
+          { title:"Introduction to SIEM Tools", url:"https://www.youtube.com/watch?v=Jz4PcjpvI1E" }
+        ],
+        pdfs:[
+          { title:"NIST SP 800-92: Guide to Computer Security Log Management", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+          { title:"NIST SP 800-94: Guide to Intrusion Detection and Prevention Systems", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-94.pdf" }
+        ],
+        objectives:[
+          "Monitor network and system events for potential incidents",
+          "Triage alerts to distinguish between benign and suspicious events",
+          "Document investigation notes and indicators of compromise (IOCs)"
+        ],
+        type:"lab",
+        lab:{
+          max:20,
+          steps:[
+            { id:"triage", points:4, regex:/^triage$/i, passMsg:"Triage started: queued events reviewed." },
+            { id:"class", points:4, regex:/^classify\s+suspicious$/i, passMsg:"Classification recorded: suspicious." },
+            { id:"note", points:4, regex:/^note\s+ioc$/i, passMsg:"Investigation notes saved with IOCs." },
+            { id:"rule", points:4, regex:/^rule$/i, passMsg:"Detection rule deployed." },
+            { id:"escalate", points:4, regex:/^escalate$/i, passMsg:"Alert escalated." }
+          ]
+        }
+      },
+      {
+        title:"Log Analysis Lab",
+        key:"logs",
+        theory:"Log analysis involves reviewing and correlating audit logs to detect anomalies, identify patterns and reconstruct events during investigations. Effective log management helps discover security incidents, meet compliance requirements and build timelines of malicious activities.",
+        videos:[
+          { title:"Log Analysis Fundamentals", url:"https://www.youtube.com/watch?v=1aXfSDzF1Hk" },
+          { title:"Using ELK Stack for Log Analysis", url:"https://www.youtube.com/watch?v=na0MoSibJfo" }
+        ],
+        pdfs:[
+          { title:"NIST SP 800-92: Guide to Computer Security Log Management", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+          { title:"SANS Enterprise Log Management Poster", url:"https://www.sans.org/security-resources/posters/enterprise_log_management/enterprise_log_management.pdf" }
+        ],
+        objectives:[
+          "List common sources of logs and their security value",
+          "Use filters and queries to identify failed logins and anomalies",
+          "Summarize log findings and create timelines of events"
+        ],
+        type:"lab",
+        lab:{
+          max:18,
+          steps:[
+            { id:"show", points:3, regex:/^show\s+logs$/i, passMsg:"Logs displayed (simulated)." },
+            { id:"filter", points:4, regex:/^filter\s+failed$/i, passMsg:"Filtered failed logins." },
+            { id:"summary", points:5, regex:/^summarize$/i, passMsg:"Summary generated: anomalies identified." },
+            { id:"anomaly", points:3, regex:/^anomaly$/i, passMsg:"Anomalies detected." },
+            { id:"timeline", points:3, regex:/^timeline$/i, passMsg:"Timeline created." }
+          ]
+        }
+      },
+      { title:"Incident Response Workflow", key:"ir",
+        theory:"The NIST incident response lifecycle has four phases: preparation, detection & analysis, containment, eradication & recovery and post-incident activity. Preparation includes establishing policies, procedures and tools. Detection and analysis involve identifying signs of incidents using logs and monitoring systems. Containment and eradication limit damage and remove malicious components, while recovery restores normal operations. Post-incident activities capture lessons learned and improve response capabilities.",
+        videos:[
+          { title:"NIST Incident Response Process", url:"https://www.youtube.com/watch?v=KY3XCMr3x_w" },
+          { title:"Incident Response Plan & Playbooks", url:"https://www.youtube.com/watch?v=GAUTW1WGrNA" }
+        ],
+        pdfs:[
+          { title:"NIST SP 800-61r2: Computer Security Incident Handling Guide", url:"https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-61r2.pdf" },
+          { title:"SANS Incident Handler’s Handbook", url:"https://www.sans.org/reading-room/whitepapers/incident/incident-handlers-handbook-33901" }
+        ],
+        objectives:[
+          "Describe the phases of the incident response lifecycle: preparation, detection & analysis, containment, eradication & recovery and post-incident activity",
+          "Identify tools and techniques used in each phase, including IDS/SIEM for detection and playbooks for containment",
+          "Develop an incident response plan and playbook tailored to your organization"
+        ]
+      }
+    ],
+    exam:[
+      { q:"Which IR phase focuses on limiting spread?", a:["Containment","Recovery","Lessons learned"], c:0 },
+      { q:"A log correlation helps you build a?", a:["Timeline","Firewall rule","Password"], c:0 }
+    ]
+  },
+  {
+    title:"Programming & Scripting",
+    track:"Programming",
+    level:"Beginner",
+    alignment:["NICE-SP"],
+    ceu:3,
+    lessons:[
+      { title:"JavaScript Fundamentals Track", key:"jsfund",
+        theory:"Programming is the act of constructing instructions for a computer to follow. JavaScript provides the building blocks—variables, operators, control structures, functions and objects—to describe data and logic in the browser. Learning these fundamentals enables you to create interactive websites and scripts.",
+        videos:[
+          { title:"JavaScript Full Course for Beginners", url:"https://www.youtube.com/watch?v=PkZNo7MFNFg" },
+          { title:"JavaScript Basics Tutorial", url:"https://www.youtube.com/watch?v=hdI2bqOjy3c" }
+        ],
+        pdfs:[
+          { title:"Eloquent JavaScript (PDF)", url:"https://eloquentjavascript.net/Eloquent_JavaScript.pdf" },
+          { title:"JavaScript Guide – MDN", url:"https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide" }
+        ],
+        objectives:[
+          "Declare variables and work with numbers, strings and booleans",
+          "Use control structures like if statements and loops",
+          "Define functions and manipulate arrays and objects"
+        ]
+      },
+      { title:"Scripting / Automation Track", key:"auto",
+        theory:"Automating tasks with scripts saves time by letting your computer handle repetitive work. Using Python, you can write programs to search the web, manipulate files and folders, scrape data, and control the mouse and keyboard. This course introduces practical automation projects.",
+        videos:[
+          { title:"Automate the Boring Stuff with Python", url:"https://www.youtube.com/watch?v=RJh-lJvwm10" },
+          { title:"Python Automation Tutorial", url:"https://www.youtube.com/watch?v=1lxrb_ezP-g" }
+        ],
+        pdfs:[
+          { title:"Automate the Boring Stuff with Python (PDF)", url:"https://automatetheboringstuff.com/2e/automatetheboringstuff.pdf" },
+          { title:"Think Python 2nd Edition", url:"https://greenteapress.com/wp/think-python-2e/" }
+        ],
+        objectives:[
+          "Automate web searches and data collection tasks",
+          "Programmatically manage files and folders",
+          "Perform web scraping and parse text data"
+        ]
+      },
+      {
+        title:"Coding Lab: Script Runner",
+        key:"scriptrun",
+        theory:"In this lab you will write and execute your own scripts. The sandbox environment captures output and safely runs code so you can test functions, explore libraries and automate simple tasks.",
+        videos:[
+          { title:"JavaScript Console Projects", url:"https://www.youtube.com/watch?v=2Ji-clqUYnA" },
+          { title:"Python Scripting Projects", url:"https://www.youtube.com/watch?v=H1elmMBnykA" }
+        ],
+        pdfs:[
+          { title:"Node.js Documentation", url:"https://nodejs.org/en/docs/" },
+          { title:"Python Standard Library", url:"https://docs.python.org/3/library/" }
+        ],
+        objectives:[
+          "Write small scripts in the sandbox to solve problems",
+          "Use built-in libraries to interact with files, arrays or strings",
+          "Debug and refine your code based on console output"
+        ],
+        type:"lab",
+        lab:{ max:0, steps:[] }
+      }
+      ,
+      {
+        title:"Python Fun Lab",
+        key:"pyfun",
+        theory:"This interactive lab teaches Python fundamentals through hands-on tasks. You'll practise printing messages, performing arithmetic, iterating through lists, writing functions and comprehensions, and defining classes.",
+        videos:[
+          { title:"Python Programming – Full Course", url:"https://www.youtube.com/watch?v=rfscVS0vtbw" },
+          { title:"Python Basics", url:"https://www.youtube.com/watch?v=_Z1eLKeUYz4" }
+        ],
+        pdfs:[
+          { title:"Automate the Boring Stuff with Python", url:"https://automatetheboringstuff.com/2e/automatetheboringstuff.pdf" },
+          { title:"Think Python 2e", url:"https://greenteapress.com/wp/think-python-2e/" }
+        ],
+        objectives:[
+          "Write simple Python programs that produce console output",
+          "Perform arithmetic and control flow using variables and loops",
+          "Use functions, list comprehensions and classes to structure code"
+        ],
+        type:"pyfun"
+      }
+    ],
+    exam:[
+      { q:"A function is used to?", a:["Store CSS","Reuse logic","Encrypt files"], c:1 },
+      { q:"A loop is used to?", a:["Repeat work","Draw images","Change DNS"], c:0 }
+    ]
+  },
+  {
+    title:"Premium Program: Advanced Security Projects",
+    track:"Capstone",
+    level:"Advanced",
+    alignment:["NICE-OV","NICE-PR"],
+    ceu:2,
+    tier:"premium",
+    lessons:[
+      { title:"Capstone: Defensive Playbook Builder", key:"capstone1",
+        theory:"A defensive playbook outlines structured procedures for responding to security incidents. Using NIST guidance, you will design a playbook that covers preparation, detection, containment, eradication, recovery and post-incident actions tailored to your organization.",
+        videos:[
+          { title:"Building an Incident Response Playbook", url:"https://www.youtube.com/watch?v=cbq4u0S2UX0" },
+          { title:"Creating Security Playbooks and Runbooks", url:"https://www.youtube.com/watch?v=oVv-jJk3-dA" }
+        ],
+        pdfs:[
+          { title:"Incident Response Playbook Template", url:"https://www.cisa.gov/sites/default/files/publications/incident-response-playbook-template.pdf" },
+          { title:"NIST SP 800-61r2", url:"https://csrc.nist.gov/publications/detail/sp/800-61/rev-2/final" }
+        ],
+        objectives:[
+          "Design a complete incident response playbook using NIST guidance",
+          "Define roles and responsibilities for each phase of a security incident",
+          "Incorporate detection, containment and recovery processes into your playbook"
+        ]
+      },
+      { title:"Capstone: Secure App Review Checklist", key:"capstone2",
+        theory:"Building a secure application review checklist involves evaluating code for common vulnerabilities like those in the OWASP Top 10, verifying authentication and authorization logic, checking input validation and session handling, and ensuring secure deployment practices.",
+        videos:[
+          { title:"Secure Code Review Checklist", url:"https://www.youtube.com/watch?v=8T3ZNS4S9Rw" },
+          { title:"OWASP Top 10 & Secure Code Review", url:"https://www.youtube.com/watch?v=n4L7X--dH5M" }
+        ],
+        pdfs:[
+          { title:"OWASP Secure Coding Practices Quick Reference", url:"https://owasp.org/www-pdf-archive/SCP_Quick_Reference_Guide_v2.pdf" },
+          { title:"OWASP Code Review Guide", url:"https://owasp.org/www-pdf-archive/Code_Review_Guide_v2.pdf" }
+        ],
+        objectives:[
+          "Create a checklist for secure code review based on OWASP best practices",
+          "Assess authentication, authorization, input validation and session management in code",
+          "Recommend remediation steps for vulnerabilities found during review"
+        ]
+      }
+    ],
+    exam:[
+      { q:"A playbook is mainly for?", a:["Repeatable response steps","UI themes","Password storage"], c:0 }
+    ]
+  }
+  ,{
+    title:"AI & Machine Learning",
+    track:"AI & ML",
+    level:"Intermediate",
+    alignment:["NICE-AN","NICE-SE"],
+    ceu:3,
+    lessons:[
+      { title:"AI Security Fundamentals", key:"aisec",
+        theory:"Artificial intelligence systems face unique security challenges, including adversarial inputs, data poisoning and model theft. Protecting AI requires understanding how models are trained, deployed and attacked, implementing robust data pipelines and integrating threat detection into the AI lifecycle.",
+        videos:[],
+        pdfs:[
+          { title:"AI Security 101 – Practical DevSecOps", url:"https://www.practical-devsecops.com/wp-content/uploads/2025/11/AI-Security-E-book-101.pdf" },
+          { title:"NIST AI RMF 1.0", url:"https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf" }
+        ],
+        objectives:[
+          "Understand adversarial attacks, data poisoning and model theft",
+          "Explain how secure data pipelines and robust training practices mitigate AI risks",
+          "Explore frameworks and standards for trustworthy AI, such as NIST’s AI Risk Management Framework"
+        ]
+      },
+      { title:"AI Agents and Large Language Models", key:"agents",
+        theory:"Large language models (LLMs) are neural networks trained on vast text corpora to generate and understand human language. They rely on tokenization, embeddings, positional encoding and self‑attention to process sequences. AI agents harness these models to perform tasks like conversation, summarization and coding.",
+        videos:[],
+        pdfs:[
+          { title:"Introduction to Large Language Models", url:"https://radcollaboratory.rutgers.edu/wp-content/uploads/2025/04/RAD-Tutorial-04292025.pdf" },
+          { title:"Comprehensive Overview of LLMs", url:"https://arxiv.org/pdf/2307.06435" }
+        ],
+        objectives:[
+          "Describe the architecture of LLMs including embeddings, attention and transformers",
+          "Explain how AI agents leverage LLMs for tasks such as chatbots and code generation",
+          "Discuss the limitations and ethical considerations of large language models"
+        ]
+      },
+      { title:"Data & AI Governance", key:"dataai",
+        theory:"Effective AI systems depend on reliable data pipelines, data governance and privacy protection. Governing data involves ensuring quality, lineage, metadata management and compliance with regulations. AI pipelines include data collection, preprocessing, model training, evaluation and deployment.",
+        videos:[],
+        pdfs:[
+          { title:"NIST AI RMF 1.0", url:"https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf" },
+          { title:"AI Ethics and Governance in Practice", url:"https://www.turing.ac.uk/sites/default/files/2023-12/aieg-ati-ai-ethics-an-intro_1.pdf" }
+        ],
+        objectives:[
+          "Outline the stages of an AI data pipeline and the importance of data quality",
+          "Describe data governance practices such as lineage, metadata management and access control",
+          "Explain privacy and compliance considerations for AI training datasets"
+        ]
+      },
+      { title:"AI Ethics & Governance", key:"aiethics",
+        theory:"Developing responsible AI requires addressing fairness, accountability, transparency, privacy and safety. Trustworthy AI systems should be valid, reliable, secure, resilient and explainable. Ethical governance involves defining policies, assessing risks and aligning AI development with societal values.",
+        videos:[],
+        pdfs:[
+          { title:"AI Ethics & Governance in Practice", url:"https://www.turing.ac.uk/sites/default/files/2023-12/aieg-ati-ai-ethics-an-intro_1.pdf" },
+          { title:"NIST AI RMF – Govern Function", url:"https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf" }
+        ],
+        objectives:[
+          "Identify principles of ethical AI including fairness, accountability, transparency and privacy",
+          "Discuss the characteristics of trustworthy AI systems such as validity, reliability and explainability",
+          "Develop policies and governance structures to manage AI risks and ensure compliance"
+        ]
+      },
+      { title:"AI Technical Lab", key:"ai_lab",
+        theory:"This lab invites you to experiment with AI APIs and pre‑trained models. You will build a simple sentiment analysis tool, explore prompt engineering for chatbots and evaluate model outputs for bias and accuracy.",
+        videos:[],
+        pdfs:[
+          { title:"Hands‑On Machine Learning (Sample)", url:"https://github.com/ageron/handson-ml/raw/master/chapter1.pdf" }
+        ],
+        objectives:[
+          "Use a pre‑trained model to perform sentiment analysis on sample text",
+          "Experiment with prompt design to achieve desired responses from a chatbot API",
+          "Evaluate outputs for accuracy and bias and document your findings"
+        ],
+        type:"lab",
+        lab:{
+          max:9,
+          steps:[
+            { id:"sentiment", points:3, regex:/^sentiment$/i, passMsg:"Sentiment analysis executed." },
+            { id:"prompt", points:3, regex:/^prompt$/i, passMsg:"Prompt engineered." },
+            { id:"evaluate", points:3, regex:/^evaluate$/i, passMsg:"Model output evaluated." }
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"Which term refers to manipulating input data to cause misclassification?", a:["Data poisoning","Model inference","Tokenization"], c:0 },
+      { q:"Transformers in LLMs rely primarily on ...", a:["Self-attention","Random forests","Logistic regression"], c:0 }
+    ]
+  },
+  {
+    title:"Quantum Computing",
+    track:"Advanced Technologies",
+    level:"Advanced",
+    alignment:["NICE-SP"],
+    ceu:2,
+    lessons:[
+      { title:"Quantum Computing Basics", key:"quantum",
+        theory:"Quantum computing uses qubits, superposition and entanglement to perform computations that are infeasible for classical computers. This lesson introduces quantum bits, quantum gates, circuits and famous algorithms.",
+        videos:[],
+        pdfs:[
+          { title:"Introduction to Quantum Computers", url:"https://help.rc.unc.edu/Assets/New_Course_Material/General_Computing/Introduction_to_Quantum_Computers.pdf" }
+        ],
+        objectives:[
+          "Define qubits, superposition and entanglement",
+          "Describe common quantum gates and how they manipulate qubits",
+          "Summarize the potential applications of quantum computing"
+        ]
+      },
+      { title:"Quantum Programming Lab", key:"q_lab",
+        theory:"In this lab you'll design simple quantum circuits using a simulator. You'll create superposition states, apply Hadamard and CNOT gates and measure qubits to observe collapse.",
+        videos:[],
+        pdfs:[
+          { title:"Quantum Circuit Basics", url:"https://help.rc.unc.edu/Assets/New_Course_Material/General_Computing/Introduction_to_Quantum_Computers.pdf" }
+        ],
+        objectives:[
+          "Create a two-qubit circuit that generates entanglement",
+          "Simulate applying Hadamard and CNOT gates using a quantum SDK",
+          "Interpret measurement results and understand probabilistic outcomes"
+        ],
+        type:"lab",
+        lab:{
+          max:9,
+          steps:[
+            { id:"superposition", points:3, regex:/^superposition$/i, passMsg:"Superposition created." },
+            { id:"entangle", points:3, regex:/^entangle$/i, passMsg:"Qubits entangled." },
+            { id:"measure", points:3, regex:/^measure$/i, passMsg:"Circuit measured." }
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"A qubit differs from a classical bit because it can ...", a:["Exist in a superposition of states","Only be 0 or 1","Store infinite energy"], c:0 },
+      { q:"Which gate creates entanglement between two qubits?", a:["CNOT","XOR","Hadamard"], c:0 }
+    ]
+  },
+  {
+    title:"Security Intelligence & Architecture",
+    track:"Architecture & Intelligence",
+    level:"Intermediate",
+    alignment:["NICE-OM","NICE-OV"],
+    ceu:3,
+    lessons:[
+      { title:"Security Intelligence & SIEM", key:"secintel",
+        theory:"Security intelligence platforms such as security information and event management (SIEM) systems collect, normalize and analyse log data from across an organization to detect threats and produce actionable alerts. They correlate events, prioritize incidents and support compliance reporting.",
+        videos:[],
+        pdfs:[
+          { title:"NIST SP 800-92: Log Management Guide", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+          { title:"IBM X‑Force 2025 Threat Intelligence Index", url:"https://www.bosconsulting.lt/reports/ibm-x-force-threat-intelligence-index-2025-report.pdf" }
+        ],
+        objectives:[
+          "Explain the purpose and components of SIEM systems",
+          "Describe how logs are collected, normalized and correlated to detect threats",
+          "Use threat intelligence to prioritize and respond to security events"
+        ]
+      },
+      { title:"Cyber Security Architecture", key:"arch",
+        theory:"Designing secure architecture requires understanding business requirements, identifying assets and threats, applying security principles such as least privilege and defence in depth and selecting controls across people, process and technology. Frameworks like SABSA, TOGAF and the NIST Cybersecurity Framework guide architecture development.",
+        videos:[],
+        pdfs:[
+          { title:"NIST Cybersecurity Framework", url:"https://nvlpubs.nist.gov/nistpubs/cswp/nist.cswp.04162018.pdf" },
+          { title:"Cybersecurity Architecture Fundamentals", url:"https://www.sans.org/white-papers/4036/" }
+        ],
+        objectives:[
+          "Identify key components of a security architecture and their interactions",
+          "Apply principles of least privilege, segmentation and defence in depth",
+          "Align architecture with frameworks such as SABSA or NIST CSF"
+        ]
+      },
+      { title:"Attack Surface Management", key:"asm",
+        theory:"Attack surface management is the continuous discovery, inventory and remediation of an organization's exposed assets and vulnerabilities. It includes external attack surface discovery, vulnerability scanning, penetration testing and prioritizing remediation based on risk.",
+        videos:[],
+        pdfs:[
+          { title:"Microsoft Attack Surface Management Overview", url:"https://learn.microsoft.com/en-us/security/attack-surface-management/overview" },
+          { title:"NIST SP 800-115: Security Testing Guide", url:"https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-115.pdf" }
+        ],
+        objectives:[
+          "Define attack surface and its components (external, internal, cloud)",
+          "Use tools to discover and inventory exposed assets and services",
+          "Prioritize vulnerabilities based on impact and likelihood"
+        ]
+      },
+      { title:"SIEM & SOC Lab", key:"siem",
+        theory:"This lab simulates the operation of a security operations centre (SOC). You'll ingest logs into a SIEM, create correlation rules, investigate alerts and generate an incident report.",
+        videos:[],
+        pdfs:[
+          { title:"NIST SP 800-92: Log Management Guide", url:"https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" }
+        ],
+        objectives:[
+          "Ingest and parse log data into a SIEM platform",
+          "Create correlation rules to detect suspicious patterns",
+          "Investigate an alert and document the incident response"
+        ],
+        type:"lab",
+        lab:{
+          max:12,
+          steps:[
+            { id:"ingest", points:4, regex:/^ingest$/i, passMsg:"Logs ingested." },
+            { id:"correlate", points:4, regex:/^correlate$/i, passMsg:"Correlation rule applied." },
+            { id:"report", points:4, regex:/^report$/i, passMsg:"Incident report generated." }
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"What is the primary function of a SIEM?", a:["Collect and analyze security logs","Store backup files","Manage user passwords"], c:0 },
+      { q:"Defence in depth means ...", a:["Layering multiple controls","Relying on a single firewall","Ignoring vulnerabilities"], c:0 }
+    ]
+  },
+  {
+    title:"DevOps & Cloud",
+    track:"DevOps & Cloud",
+    level:"Intermediate",
+    alignment:["NICE-SP","NICE-OM"],
+    ceu:3,
+    lessons:[
+      { title:"DevOps: ARM & FinOps", key:"arm",
+        theory:"Infrastructure as Code (IaC) tools like ARM templates, CloudFormation and Terraform enable consistent deployment of resources. FinOps combines financial accountability with cloud engineering to optimize costs. This lesson covers IaC principles and cost management strategies.",
+        videos:[],
+        pdfs:[
+          { title:"Azure ARM Templates Overview", url:"https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/overview" },
+          { title:"FinOps Introduction", url:"https://www.finops.org/introduction/what-is-finops/" }
+        ],
+        objectives:[
+          "Explain how Infrastructure as Code tools define and manage cloud resources",
+          "Describe FinOps practices to optimize cloud spending",
+          "Write a simple IaC template to deploy a virtual machine"
+        ]
+      },
+      { title:"DevOps: AIOps & Observability", key:"aiops",
+        theory:"AIOps applies AI and machine learning to operations data to automate monitoring, anomaly detection and root cause analysis. Observability combines metrics, logs and traces to provide deep visibility into applications. This lesson introduces AIOps platforms and observability patterns.",
+        videos:[],
+        pdfs:[
+          { title:"Google Cloud AIOps Whitepaper", url:"https://cloud.google.com/files/operations/aiops-for-operations.pdf" },
+          { title:"Observability Engineering (Excerpt)", url:"https://www.honeycomb.io/resources/observability-engineering-oreilly-excerpt" }
+        ],
+        objectives:[
+          "Define AIOps and how it augments traditional DevOps practices",
+          "Explain the three pillars of observability: metrics, logs and traces",
+          "Set up simple alerts based on anomaly detection rules"
+        ]
+      },
+      { title:"API Connect & Data Fabric", key:"apicon",
+        theory:"API management platforms like Apigee and IBM API Connect help organizations create, secure and monetize APIs. Data fabric is an architecture that provides unified access to data across hybrid and multi-cloud environments. This lesson explores API gateways, developer portals and data fabric patterns.",
+        videos:[],
+        pdfs:[
+          { title:"Apigee API Management Overview", url:"https://cloud.google.com/apigee/docs/api-platform/overview" },
+          { title:"IBM Data Fabric Overview", url:"https://www.ibm.com/docs/en/cloud-paks/cp-data/4.0?topic=overview-data-fabric" }
+        ],
+        objectives:[
+          "Describe the lifecycle of API management: create, secure, publish and monitor",
+          "Explain the concept of a data fabric and its role in data governance",
+          "Identify key components of API gateways and developer portals"
+        ]
+      }
+    ],
+    exam:[
+      { q:"Infrastructure as Code tools like ARM templates help with ...", a:["Consistent deployment of cloud resources","User interface design","Marketing campaigns"], c:0 },
+      { q:"AIOps primarily uses ...", a:["Machine learning to analyze ops data","Manual scripts","Customer surveys"], c:0 }
+    ]
+  }
+
+  ,
+  // Added AI Models & Deep Learning course to expand AI & ML topics
+  {
+    title:"AI Models & Deep Learning",
+    track:"AI & ML",
+    level:"Intermediate",
+    alignment:["NICE-AN","NICE-SP"],
+    ceu:3,
+    lessons:[
+      { title:"AI Models Explained", key:"aimodels",
+        theory:"Machine learning encompasses supervised, unsupervised and reinforcement paradigms. Models include linear and logistic regression, decision trees, support vector machines, neural networks and deep reinforcement learners. Deep learning stacks layers of neurons to automatically extract hierarchical features, powering applications from computer vision to speech recognition.",
+        videos:[],
+        pdfs:[
+          { title:"Neural Networks and Deep Learning (Online Book)", url:"https://neuralnetworksanddeeplearning.com" },
+          { title:"Deep Learning (MIT Press)", url:"https://www.deeplearningbook.org" }
+        ],
+        objectives:[
+          "Differentiate supervised, unsupervised and reinforcement learning",
+          "Describe how neural networks learn hierarchical representations through layers",
+          "Recognize common model types such as CNNs, RNNs and transformers and their applications"
+        ]
+      },
+      { title:"Large Language Models & Chatbots", key:"llm",
+        theory:"Large language models (LLMs) are trained on massive text corpora to predict the next token in a sequence. They leverage embeddings, positional encodings and self‑attention to model long‑range dependencies. Fine‑tuned LLMs power chatbots, coding assistants and content generators.",
+        videos:[],
+        pdfs:[
+          { title:"An In‑Depth Overview of Large Language Models", url:"https://arxiv.org/pdf/2307.06435" },
+          { title:"Practical Guide to Building Agents", url:"https://openai.com" }
+        ],
+        objectives:[
+          "Explain how tokenization and embeddings represent text for neural networks",
+          "Summarize the self‑attention mechanism and its role in transformers",
+          "Discuss the capabilities and limitations of chatbots built on LLMs"
+        ]
+      },
+      { title:"AI Technical Tutorials", key:"aituts",
+        theory:"Practical AI requires mastering core tasks such as classification, regression, clustering, natural language processing and reinforcement learning. This lesson introduces scikit‑learn for classical machine learning and demonstrates how to build, evaluate and deploy models.",
+        videos:[],
+        pdfs:[
+          { title:"Hands‑On Machine Learning with Scikit‑Learn (Chapter 1)", url:"https://github.com/ageron/handson-ml/raw/master/chapter1.pdf" },
+          { title:"Introduction to Machine Learning (Lecture Slides)", url:"https://www.cs.princeton.edu/courses/archive/spring23/cos485/slides/intro-ml.pdf" }
+        ],
+        objectives:[
+          "Implement classification and regression models using an ML library",
+          "Compare evaluation metrics such as accuracy, precision and recall",
+          "Experiment with clustering and reinforcement learning basics"
+        ]
+      }
+    ],
+    exam:[
+      { q:"Which machine learning paradigm uses labelled data?", a:["Supervised learning","Unsupervised learning","Reinforcement learning"], c:0 },
+      { q:"Transformers rely on which mechanism to model relationships?", a:["Self‑attention","Convolution","Random forests"], c:0 }
+    ]
+  }
+
+  ,
+  // Added Quantum Pro Skills course for advanced quantum topics
+  {
+    title:"Quantum Pro Skills",
+    track:"Advanced Technologies",
+    level:"Advanced",
+    alignment:["NICE-SP"],
+    ceu:3,
+    lessons:[
+      { title:"Quantum Algorithms & Applications", key:"q_algorithms",
+        theory:"Beyond introductory concepts, quantum algorithms harness quantum parallelism and interference to achieve speedups. Shor’s algorithm factors large integers exponentially faster than classical methods, while Grover’s algorithm provides a quadratic improvement for unstructured search. Quantum simulation, quantum walks and variational algorithms target chemistry, optimization and machine learning.",
+        videos:[],
+        pdfs:[
+          { title:"IBM Quantum Introduction", url:"https://epic-photonics.com/wp-content/uploads/2021/07/Robert-Loredo_IBM.pdf" },
+          { title:"Qiskit Algorithms Chapter", url:"https://qiskit.org/textbook/ch-algorithms/index.html" }
+        ],
+        objectives:[
+          "Explain the principles and steps of Shor’s and Grover’s algorithms",
+          "Identify domains where quantum algorithms could offer advantages",
+          "Discuss current limitations and research directions in quantum algorithms"
+        ]
+      },
+      { title:"Quantum Error Correction", key:"q_error",
+        theory:"Quantum systems are fragile and susceptible to noise and decoherence. Quantum error correction codes such as the Shor code, Steane code and surface code protect qubits by encoding logical information into entangled states. Syndromes detect errors and corrective operations restore the original state without measuring the encoded information.",
+        videos:[],
+        pdfs:[
+          { title:"Introduction to Quantum Error Correction", url:"https://arxiv.org/pdf/quant-ph/9705031.pdf" },
+          { title:"Topological Quantum Codes Lecture Notes", url:"https://arxiv.org/pdf/1503.08814.pdf" }
+        ],
+        objectives:[
+          "Describe how errors such as bit‑flip and phase‑flip affect qubits",
+          "Explain the concept of redundancy and syndrome measurement in quantum codes",
+          "Compare different quantum error correction schemes and their trade‑offs"
+        ]
+      },
+      { title:"Quantum Advanced Lab", key:"q_adv_lab",
+        theory:"This lab builds on your quantum basics by implementing algorithms in a simulator. You will model Shor’s factoring algorithm for small numbers, implement Grover’s search on a toy problem and explore simple error correction circuits using repetition codes.",
+        videos:[],
+        pdfs:[
+          { title:"Qiskit Tutorials: Algorithms", url:"https://qiskit.org/textbook/ch-algorithms/index.html" },
+          { title:"Quantum Error Correction Notes", url:"https://arxiv.org/pdf/quant-ph/9705031.pdf" }
+        ],
+        objectives:[
+          "Run a simplified Shor’s algorithm on a simulator and interpret the output",
+          "Implement Grover’s algorithm to search an unsorted list of four items",
+          "Experiment with a 3‑qubit repetition code to detect and correct a single error"
+        ],
+        type:"lab",
+        lab:{
+          max:9,
+          steps:[
+            { id:"shor", points:3, regex:/^shor$/i, passMsg:"Shor’s algorithm simulated." },
+            { id:"grover", points:3, regex:/^grover$/i, passMsg:"Grover’s algorithm simulated." },
+            { id:"qec", points:3, regex:/^qec$/i, passMsg:"Error correction executed." }
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"Shor’s algorithm provides a dramatic speedup for ...", a:["Factoring integers","Sorting lists","Calculating sines"], c:0 },
+      { q:"Quantum error correction protects qubits against ...", a:["Noise and decoherence","Faster computation","Classical bits"], c:0 }
+    ]
+  }
+
+  ,
+  // Added IBM Systems & Infrastructure course covering hardware and virtualization
+  {
+    title:"IBM Systems & Infrastructure",
+    track:"IBM Systems",
+    level:"Intermediate",
+    alignment:["NICE-SP","NICE-OM"],
+    ceu:3,
+    lessons:[
+      { title:"IBM Z Mainframes & Architecture", key:"ibmz",
+        theory:"IBM Z mainframes are designed for high reliability, availability and serviceability. They support massive transaction volumes, pervasive encryption and hardware virtualization through logical partitions (LPARs) and z/VM. This lesson surveys the evolution of IBM Z, its processor architecture and unique features such as simultaneous multithreading and on‑chip cryptographic accelerators.",
+        videos:[],
+        pdfs:[
+          { title:"IBM Z Mainframe Overview", url:"https://public.dhe.ibm.com/systems/z/education/library/courses/zos/basic/intro.pdf" },
+          { title:"Virtualization 2.0 Tutorial", url:"https://www.tutorialspoint.com/virtualization2.0/virtualization2.0_tutorial.pdf" }
+        ],
+        objectives:[
+          "Describe the architectural characteristics that differentiate IBM Z systems",
+          "Explain logical partitioning and how it enables virtualization and workload isolation",
+          "Identify encryption features and cryptographic accelerators built into IBM Z processors"
+        ]
+      },
+      { title:"Power Systems & Virtualization", key:"power",
+        theory:"IBM Power Systems leverage the Power processor architecture to deliver high performance and scalability. PowerVM provides advanced virtualization features, micro‑partitioning and shared processor pools. This lesson introduces Power processor design, AIX and Linux support and virtualization concepts such as logical partitions (LPARs) and shared processor pools.",
+        videos:[],
+        pdfs:[
+          { title:"Introduction to IBM Power Systems", url:"https://public.dhe.ibm.com/systems/power/docs/systemoverview/power-systems-overview.pdf" },
+          { title:"PowerVM Virtualization Introduction", url:"https://public.dhe.ibm.com/systems/power/docs/linux/virtualization-guide.pdf" }
+        ],
+        objectives:[
+          "Summarize the features of IBM Power processors and their advantages",
+          "Explain how PowerVM implements virtualization through LPARs and shared processors",
+          "Compare virtualization on Power Systems to virtualization on other platforms"
+        ]
+      },
+      { title:"IBM Storage & Backup Solutions", key:"ibmstorage",
+        theory:"IBM offers storage solutions ranging from high‑performance flash arrays to tape libraries. FlashSystem provides low latency and high throughput for databases and analytics. IBM Spectrum Protect delivers enterprise backup and recovery capabilities. This lesson reviews storage architectures, redundancy mechanisms and data protection strategies.",
+        videos:[],
+        pdfs:[
+          { title:"IBM FlashSystem Family Overview", url:"https://www.ibm.com/downloads/cas/9WZRXRAP" },
+          { title:"IBM Spectrum Protect Overview", url:"https://www.ibm.com/downloads/cas/G7VZ0KPZ" }
+        ],
+        objectives:[
+          "Identify the differences between flash, disk and tape storage solutions",
+          "Understand RAID levels, replication and snapshot technologies",
+          "Describe how IBM Spectrum Protect automates backup and recovery"
+        ]
+      },
+      { title:"IBM Systems Lab", key:"ibm_lab",
+        theory:"This lab provides hands‑on practice with IBM server environments through a simulator. You will create logical partitions, allocate virtual processors and memory, and configure backup procedures in a mocked IBM environment.",
+        videos:[],
+        pdfs:[
+          { title:"Virtualization 2.0 Tutorial", url:"https://www.tutorialspoint.com/virtualization2.0/virtualization2.0_tutorial.pdf" }
+        ],
+        objectives:[
+          "Create an LPAR and allocate CPU and memory resources",
+          "Partition a workload across multiple virtual machines",
+          "Configure a backup job and verify its completion"
+        ],
+        type:"lab",
+        lab:{
+          max:9,
+          steps:[
+            { id:"virtualize", points:3, regex:/^virtualize$/i, passMsg:"LPAR created." },
+            { id:"partition", points:3, regex:/^partition$/i, passMsg:"Workload partitioned." },
+            { id:"backup", points:3, regex:/^backup$/i, passMsg:"Backup configured." }
+          ]
+        }
+      }
+    ],
+    exam:[
+      { q:"IBM Z systems are renowned for ...", a:["High reliability and security","Low power GPU acceleration","Gaming performance"], c:0 },
+      { q:"PowerVM enables ...", a:["Logical partitioning and shared processor pools","Cryptocurrency mining","Disabling virtualization"], c:0 }
+    ]
+  }
+];
+
+/* =========================================================
+   MODULE ARCHITECTURE (NAMESPACED)
+   Adds features without overwriting existing functions. All
+   new capabilities live on window.MHA.modules.* so they can
+   be split into external files later without code changes.
+========================================================= */
+window.MHA={modules:{}};
+
+// Lab engine: scores commands and tracks completion
+MHA.modules.labs=(()=>{
+  function init(key){ if(!state.labScores[key]) state.labScores[key]={ score:0, done:{} }; return state.labScores[key]; }
+  function grade(key,input){
+    const lesson=findLesson(key);
+    if(!lesson || !lesson.lab) return null;
+    const st=init(key);
+    for(const step of lesson.lab.steps){
+      if(st.done[step.id]) continue;
+      if(step.regex.test(input)){
+        st.done[step.id]=1;
+        st.score+=step.points;
+        save();
+        return `${step.passMsg} (+${step.points})`;
+      }
+    }
+    return "Incorrect command";
+  }
+  function passed(key){
+    const lesson=findLesson(key);
+    if(!lesson || !lesson.lab) return true;
+    const st=init(key);
+    return st.score >= Math.ceil(lesson.lab.max * 0.8);
+  }
+  return { grade, passed };
+})();
+
+// Exam engine: calculates scores and stores pass state
+MHA.modules.exams=(()=>{
+  function grade(courseIndex,answers){
+    const course=COURSES[courseIndex];
+    let s=0;
+    course.exam.forEach((q,i)=>{ if(answers[i] === q.c) s++; });
+    const percent = Math.round((s / course.exam.length) * 100);
+    state.examScores[course.title] = { score: percent, passed: percent >= 70 };
+    save();
+    return state.examScores[course.title];
+  }
+  return { grade };
+})();
+
+// Gate logic: ensures lessons and labs completed before exam
+MHA.modules.gates=(()=>{
+  function lessonsDone(course){ return course.lessons.every(l=> state.progress[l.key]); }
+  function labsDone(course){ return course.lessons.filter(l=> l.type === "lab").every(l=> MHA.modules.labs.passed(l.key)); }
+  return {
+    canExam: course => lessonsDone(course) && labsDone(course)
+  };
+})();
+
+/* =========================================================
+   PYTHON FUN LAB TASKS
+   Provides interactive challenges for the Python fun lab. Each
+   task requires learners to write Python code matching a
+   regular expression. Feedback is provided after each submission.
+========================================================= */
+const pythonState = {
+  index: 0,
+  tasks: [
+    {
+      title: "Hello World",
+      description: "Write a Python script that prints 'Hello, world!'. Use the print() function.",
+      regex: /^\s*print\s*\(\s*['\"]Hello,\s*world!['\"]\s*\)\s*;?\s*$/i
+    },
+    {
+      title: "Add Two Numbers",
+      description: "Write a Python script that adds 5 and 7 and prints the result.",
+      regex: /^\s*print\s*\(\s*5\s*\+\s*7\s*\)\s*$/i
+    },
+    {
+      title: "List and For Loop",
+      description: "Create a list with the numbers 1 to 5 and use a for loop to print each number on its own line.",
+      regex: /^\s*lst\s*=\s*\[\s*1\s*,\s*2\s*,\s*3\s*,\s*4\s*,\s*5\s*\]\s*(?:\r?\n)+\s*for\s+\w+\s+in\s+lst\s*:\s*(?:\r?\n)+\s*print\s*\(\s*\w+\s*\)\s*$/i
+    },
+    {
+      title: "Even Function",
+      description: "Define a function is_even(n) that returns True if n is even and False otherwise. Call the function with 4 and print the result.",
+      regex: /^\s*def\s+is_even\s*\(\s*\w+\s*\)\s*:\s*(?:\r?\n)+\s*if\s+\w+\s*%\s*2\s*==\s*0\s*:\s*(?:\r?\n)+\s*return\s+True\s*(?:\r?\n)+\s*else\s*:\s*(?:\r?\n)+\s*return\s+False\s*(?:\r?\n)+\s*print\s*\(\s*is_even\s*\(\s*4\s*\)\s*\)\s*$/i
+    },
+    {
+      title: "List Comprehension",
+      description: "Use a list comprehension to create a list of squares of numbers 1 through 5 and print the list.",
+      regex: /^\s*print\s*\(\s*\[\s*\w+\s*\*\s*\w+\s*for\s+\w+\s+in\s+range\s*\(\s*1\s*,\s*6\s*\)\s*\]\s*\)\s*$/i
+    },
+    {
+      title: "Define a Class",
+      description: "Define a class Person with an __init__ method that stores a name. Create a Person object with your name and print the name attribute.",
+      regex: /^\s*class\s+Person\s*:\s*(?:\r?\n)+\s*def\s+__init__\s*\(\s*self\s*,\s*name\s*\)\s*:\s*(?:\r?\n)+\s*self\.\w+\s*=\s*name\s*(?:\r?\n)+\s*\w+\s*=\s*Person\s*\(\s*['\"].+['\"]\s*\)\s*(?:\r?\n)+\s*print\s*\(\s*\w+\.\w+\s*\)\s*$/i
+    }
+  ]
+};
+
+// Display the current Python task by updating the title and description elements.
+function displayPythonTask(){
+  // Render the current Python task description and reset the input field.
+  const t = pythonState.tasks[pythonState.index];
+  if(!t) return;
+  // Display task title and description in the designated container
+  const descEl = document.getElementById('py-task');
+  if(descEl){
+    descEl.innerHTML = `<strong>${esc(t.title)}</strong><br>${esc(t.description)}`;
+  }
+  // Clear the code input field
+  const input = document.getElementById('py-input');
+  if(input) input.value = '';
+}
+
+// Evaluate the user's input for the current Python task
+function evaluatePython(){
+  // Get the user's code from the textarea
+  const inputEl = document.getElementById('py-input');
+  if(!inputEl) return;
+  const code = inputEl.value.trim();
+  const t = pythonState.tasks[pythonState.index];
+  if(!t) return;
+  // Output feedback to the terminal area
+  const term = document.getElementById('py-term');
+  // Check the user input against the regex for the current task
+  if(t.regex.test(code)){
+    if(term) term.innerHTML += `<div>&gt; ${esc(code)}</div><div class="completed">✅ Correct! ${esc(t.title)} completed.</div>`;
+    pythonState.index++;
+    if(pythonState.index < pythonState.tasks.length){
+      displayPythonTask();
+    } else {
+      if(term) term.innerHTML += '<div class="completed">🎉 All Python tasks completed!</div>';
+    }
+  } else {
+    if(term) term.innerHTML += `<div>&gt; ${esc(code)}</div><div style="color:#ff8080;">❌ That does not match the expected solution. Please try again.</div>`;
+  }
+  // Clear the input field and scroll terminal to bottom
+  inputEl.value = '';
+  if(term) term.scrollTop = term.scrollHeight;
+}
+
+// Skip the current Python task and move to the next
+function nextPythonTask(){
+  const term = document.getElementById('py-term');
+  pythonState.index++;
+  if(pythonState.index < pythonState.tasks.length){
+    if(term) term.innerHTML += '<div style="color:#ffcc00;">⏭️ Skipped to the next task.</div>';
+    displayPythonTask();
+  } else {
+    if(term) term.innerHTML += '<div class="completed">🎉 All Python tasks completed!</div>';
+  }
+}
+
+/* =========================================================
+   HELPER TO FIND LESSON BY KEY
+========================================================= */
+function findLesson(key){
+  for(const c of COURSES){
+    for(const l of c.lessons){
+      if(l.key === key) return l;
+    }
+  }
+}
+
+/* =========================================================
+   ROUTER
+   Simple view manager. Provides navigation between home,
+   index, courses, individual course, lesson, profile and exams.
+========================================================= */
+function route(view,payload){
+  if(view === 'home') return home();
+  if(view === 'index') return indexView();
+  if(view === 'courses') return coursesView();
+  if(view === 'course') return courseView(payload);
+  if(view === 'lesson') return lessonView(payload.c,payload.l);
+  if(view === 'exam') return examView(payload);
+  if(view === 'profile') return profileView();
+  if(view === 'standards') return standardsView();
+}
+
+/* =========================================================
+   VIEW FUNCTIONS
+   Renders different screens. Minimal styling for clarity.
+========================================================= */
+function home(){
+  app.innerHTML=`<div class="card">
+    <h2>Welcome</h2>
+    <p>Learn, Deploy, Protect. A Comprehensive Skill Guide For Cyber Solutions and Specialists.</p>
+    <button class="primary" onclick="route('index')">Open Index</button>
+    <button class="primary" onclick="route('courses')">Browse Courses</button>
+  </div>`;
+}
+
+function indexView(){
+  app.innerHTML=`<div class="card"><h2>Course Index</h2>
+    ${COURSES.map((c,ci)=>`
+      <h3>${esc(c.title)} ${c.tier?pill(c.tier.toUpperCase(), 'lock'):pill('FREE','free')}</h3>
+      ${c.lessons.map((l,li)=>{
+        const lab = l.type === 'lab' ? ' '+pill('LAB','lab') : '';
+        const done = state.progress[l.key] ? ' '+pill('DONE','free') : '';
+        return `<div class="lesson" onclick=\"route('lesson',{c:${ci},l:${li}})\">${esc(l.title)}${lab}${done}</div>`;
+      }).join('')}
+    `).join('')}
+    </div>`;
+}
+
+function coursesView(){
+  // Group courses by track for improved organisation
+  const grouped = {};
+  COURSES.forEach((course, idx) => {
+    const t = course.track || 'General';
+    if(!grouped[t]) grouped[t] = [];
+    grouped[t].push({ course: course, idx: idx });
+  });
+  let html = '<div class="card"><h2>Courses</h2>';
+  Object.keys(grouped).forEach(track => {
+    html += `<h3>${esc(track)}</h3>`;
+    grouped[track].forEach(item => {
+      const c = item.course;
+      const i = item.idx;
+      const tag = c.tier ? pill(c.tier.toUpperCase(), 'lock') : pill('FREE','free');
+      html += `<div class="lesson" onclick="route('course',${i})">${esc(c.title)} ${tag}</div>`;
+    });
+  });
+  html += '</div>';
+  app.innerHTML = html;
+}
+
+function courseView(i){
+  const c = COURSES[i];
+  app.innerHTML=`<div class="card"><h2>${esc(c.title)}</h2>
+    ${c.lessons.map((l,li)=>{
+      return `<div class="lesson" onclick=\"route('lesson',{c:${i},l:${li}})\">${esc(l.title)}</div>`;
+    }).join('')}
+    ${MHA.modules.gates.canExam(c) ? `<button class="primary" onclick="examView(${i})">Take Final Exam</button>` : '<p class="locked">Complete all lessons and labs to unlock exam.</p>'}
+  </div>`;
+}
+
+function lessonView(ci,li){
+  const l = COURSES[ci].lessons[li];
+  // Build the lesson content dynamically. Display theory or lesson plan,
+  // objectives/assignments, and resource links. Only show the terminal input for labs.
+  let html = `<div class="card"><h2>${esc(l.title)}</h2>`;
+  // Show the lesson narrative (lessonPlan or theory). Preserve formatting.
+  const narrative = l.lessonPlan || l.theory || '';
+  if(narrative){
+    // Escape HTML special characters and convert newlines to <br> for readability
+    const text = esc(narrative).replace(/\n/g, '<br>');
+    html += `<div class="lesson-text">${text}</div>`;
+  }
+  // Show objectives or assignments as bullet list
+  const obj = l.objectives || l.assignments;
+  if(obj && obj.length){
+    html += '<h3>Objectives</h3><ul>';
+    obj.forEach(item => {
+      html += `<li>${esc(item)}</li>`;
+    });
+    html += '</ul>';
+  }
+  // Show videos
+  const vids = l.videos;
+  if(vids && vids.length){
+    html += '<h3>Videos</h3><ul>';
+    vids.forEach(v => {
+      html += `<li><a href="${esc(v.url)}" target="_blank">${esc(v.title)}</a></li>`;
+    });
+    html += '</ul>';
+  }
+  // Show PDFs or additional resources
+  const pdfs = l.pdfs;
+  const more = l.moreResources;
+  const resources = [];
+  if(pdfs && pdfs.length) resources.push(...pdfs);
+  if(more && more.length) resources.push(...more);
+  if(resources.length){
+    html += '<h3>Resources</h3><ul>';
+    resources.forEach(r => {
+      html += `<li><a href="${esc(r.url)}" target="_blank">${esc(r.title)}</a></li>`;
+    });
+    html += '</ul>';
+  }
+
+  // Show diagrams as embedded images with download links if provided
+  const imgs = l.images;
+  if(imgs && imgs.length){
+    html += '<h3>Diagrams</h3>';
+    imgs.forEach(img => {
+      // Use the alt text as a label for the image; default to 'Diagram' if none provided
+      const label = img.alt || 'Diagram';
+      // Display the image and allow downloading by clicking on it
+      html += `<a href="${img.src}" download><img class="diagram" src="${img.src}" alt="${esc(label)}"></a>`;
+      // Show a caption underneath the diagram
+      html += `<div class="lesson-text"><em>${esc(label)}</em></div>`;
+    });
+  }
+  // If this lesson is a Python fun lab, render interactive tasks
+  if(l.type === 'pyfun'){
+    html += '<h3>Python Fun Lab</h3>';
+    // Task description will appear here
+    html += '<div id="py-task" class="lesson-text"></div>';
+    // Terminal output for feedback
+    html += '<div class="terminal" id="py-term"></div>';
+    // Code input area
+    html += '<textarea id="py-input" class="term" placeholder="Write your Python code here. Use Shift+Enter for new lines; press Enter to submit."></textarea>';
+    // Buttons for submitting code and skipping tasks
+    html += '<button class="primary" id="py-submit">Submit</button>';
+    html += '<button class="primary" id="py-skip" style="margin-left:8px;">Skip</button>';
+  }
+  // If this lesson is a lab, show the terminal and command input
+  if(l.lab){
+    html += '<h3>Lab Interface</h3>';
+    html += '<div class="terminal" id="term"></div>';
+    html += '<input class="term" id="cmd" placeholder="type command & press enter">';
+  }
+  // Mark complete button
+  html += `<button class="primary" onclick="complete('${l.key}')">Mark Complete</button>`;
+  html += '</div>';
+  app.innerHTML = html;
+  // Wire the lab input only if needed
+  if(l.lab){
+    const input = document.getElementById('cmd');
+    input.onkeydown = e => {
+      if(e.key === 'Enter'){
+        const res = MHA.modules.labs.grade(l.key, e.target.value);
+        if(res) document.getElementById('term').innerHTML += `<div>${esc(res)}</div>`;
+        e.target.value = '';
+      }
+    };
+  }
+
+  // Initialise Python fun lab if applicable
+  if(l.type === 'pyfun'){
+    pythonState.index = 0;
+    displayPythonTask();
+    const textarea = document.getElementById('py-input');
+    if(textarea){
+      textarea.addEventListener('keydown', function(e){
+        if(e.key === 'Enter' && !e.shiftKey){
+          e.preventDefault();
+          evaluatePython(textarea.value);
+          textarea.value = '';
+        }
+      });
+    }
+    const submitBtn = document.getElementById('py-submit');
+    if(submitBtn){
+      submitBtn.onclick = function(){
+        const ta = document.getElementById('py-input');
+        if(ta) {
+          evaluatePython(ta.value);
+          ta.value = '';
+        }
+      };
+    }
+    const skipBtn = document.getElementById('py-skip');
+    if(skipBtn){
+      skipBtn.onclick = nextPythonTask;
+    }
+  }
+}
+
+function complete(key){
+  state.progress[key] = 1;
+  save();
+  alert('Lesson marked complete');
+}
+
+function profileView(){
+  let html = `<div class="card">
+    <h2>Profile</h2>
+    <p>Tier: ${esc(state.subscription.tier)}</p>
+    <p>Completed lessons: ${Object.keys(state.progress).length}</p>
+    <p>Exams passed: ${Object.values(state.examScores).filter(x => x.passed).length}</p>`;
+  // List certificates if available
+  if(state.certificates && state.certificates.length > 0){
+    html += '<h3>Certificates</h3><ul style="list-style:none;padding-left:0;">';
+    state.certificates.forEach((cert,i) => {
+      const dateStr = new Date(cert.date).toLocaleDateString();
+      html += `<li style="margin-bottom:6px;">${esc(cert.course)} (${dateStr}) ` +
+              `<button class="primary" style="margin-left:8px;" onclick="generateCertificate('${cert.course}')">Download</button></li>`;
+    });
+    html += '</ul>';
+  }
+  html += '</div>';
+  app.innerHTML = html;
+}
+
+// Displays mapping of courses to NICE Framework categories and CEU values
+function standardsView(){
+  let html = '<div class="card"><h2>Standards Alignment</h2>';
+  html += '<p>This curriculum aligns with the NIST NICE Framework categories and awards Continuing Education Units (CEUs) in accordance with recognized accreditation guidelines.</p>';
+  html += '<table style="width:100%;border-collapse:collapse;">';
+  html += '<tr><th style="border:1px solid var(--g);padding:4px;">Course</th><th style="border:1px solid var(--g);padding:4px;">Alignment (NICE)</th><th style="border:1px solid var(--g);padding:4px;">CEUs</th></tr>';
+  COURSES.forEach(c => {
+    const align = c.alignment ? c.alignment.join(', ') : '';
+    const ceu = c.ceu !== undefined ? c.ceu : '';
+    html += `<tr><td style="border:1px solid var(--g);padding:4px;">${esc(c.title)}</td><td style="border:1px solid var(--g);padding:4px;">${esc(align)}</td><td style="border:1px solid var(--g);padding:4px;">${esc(String(ceu))}</td></tr>`;
+  });
+  html += '</table></div>';
+  app.innerHTML = html;
+}
+
+function examView(ci){
+  const c = COURSES[ci];
+  app.innerHTML=`<div class="card"><h2>Exam: ${esc(c.title)}</h2>
+    ${c.exam.map((q,i)=>`
+      <p>${esc(q.q)}<br>
+        ${q.a.map((o,j)=>`<label><input type="radio" name="q${i}" value="${j}">${esc(o)}</label>`).join('<br>')}
+      </p>
+    `).join('')}
+    <button class="primary" onclick="submitExam(${ci})">Submit</button>
+  </div>`;
+}
+
+function submitExam(ci){
+  const c = COURSES[ci];
+  const answers = [];
+  c.exam.forEach((q,i)=>{
+    const r = document.querySelector(`input[name=q${i}]:checked`);
+    answers[i] = r ? +r.value : null;
+  });
+  const result = MHA.modules.exams.grade(ci, answers);
+  alert('Score: ' + result.score + '%');
+  // If exam passed, record certificate and offer to download
+  if(result.passed){
+    state.certificates = state.certificates || [];
+    // Add certificate record with course, date and user
+    const cert = { course: c.title, date: new Date().toISOString() };
+    state.certificates.push(cert);
+    save();
+    if(confirm('Congratulations! You passed this course. Would you like to download your certificate now?')){
+      generateCertificate(c.title);
+    }
+  }
+}
+
+// Certificate generation helper function.
+// Opens a new window with a certificate and triggers the print dialog.
+window.generateCertificate = function(courseTitle){
+  const username = (window.auth && window.auth.currentUser) ? window.auth.currentUser : 'Student';
+  const certDate = new Date().toLocaleDateString();
+  const certHTML = `
+    <html><head><title>Certificate of Completion</title><style>
+      body{font-family:Georgia,serif;text-align:center;background:#fafafa;color:#000;padding:60px;}
+      .border{border:8px double #000;padding:40px;}
+      h1{font-size:32px;margin-bottom:20px;}
+      h2{font-size:24px;margin:10px 0;}
+      p{font-size:16px;margin:8px 0;}
+    </style></head><body>
+    <div class="border">
+    <h1>Certificate of Completion</h1>
+    <p>This certifies that</p>
+    <h2>${username}</h2>
+    <p>has successfully completed the course</p>
+    <h2>${courseTitle}</h2>
+    <p>on ${certDate}</p>
+    <p>Issued by Invicta Cyber Solutions</p>
+    </div>
+    </body></html>
+  `;
+  const win = window.open('', '_blank');
+  win.document.write(certHTML);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ win.print(); }, 200);
+};
+
+// Start at home view
+route('home');
+</script>
+
+<script>
+  /* =========================================================
+     QUIZ & AUTHENTICATION EXTENSIONS
+     Adds a simple login system and comprehension quizzes for
+     each lesson. This does not modify existing functions but
+     adds new capabilities under MHA.modules and overrides some
+     global functions at runtime. User data (progress, scores)
+     are stored per-user in localStorage.usersData.
+  ========================================================= */
+  (function(){
+    // ---------- Authentication ----------
+    const auth = { currentUser: null };
+    let users = JSON.parse(localStorage.getItem('usersData') || '{}');
+    // Override save() to write user-specific state
+    const oldSave = window.save;
+    window.save = function(){
+      if(auth.currentUser){
+        users[auth.currentUser] = users[auth.currentUser] || {};
+        users[auth.currentUser].state = state;
+        localStorage.setItem('usersData', JSON.stringify(users));
+      }
+      oldSave();
+    };
+    // Override route() to force login unless a user is authenticated.  This
+    // enhanced router explicitly handles the 'login' and 'register' views by
+    // invoking the appropriate form renderer when no user is logged in.  If
+    // another view is requested while unauthenticated, the login form is
+    // displayed.  Once a user is authenticated, navigation is deferred to
+    // the original router defined elsewhere in the page.
+    const oldRoute = window.route;
+    window.route = function(view, payload){
+      // If user is not logged in, decide which view to show
+      if(!auth.currentUser){
+        if(view === 'register'){
+          return registerView();
+        }
+        if(view === 'login'){
+          return loginView();
+        }
+        // Default fallback when unauthenticated
+        return loginView();
+      }
+      // If user is logged in, use the original route logic
+      return oldRoute(view, payload);
+    };
+    // Build navigation buttons for login/logout
+    function updateNav(){
+      const nav = document.querySelector('nav');
+      if(!nav) return;
+      // Remove existing auth buttons
+      nav.querySelectorAll('.auth-btn').forEach(btn => btn.remove());
+      if(auth.currentUser){
+        const lo = document.createElement('button');
+        lo.className = 'auth-btn';
+        lo.textContent = 'Logout';
+        lo.onclick = () => {
+          save();
+          auth.currentUser = null;
+          route('login');
+          updateNav();
+        };
+        nav.appendChild(lo);
+      } else {
+        const li = document.createElement('button');
+        li.className = 'auth-btn';
+        li.textContent = 'Login';
+        li.onclick = () => route('login');
+        const re = document.createElement('button');
+        re.className = 'auth-btn';
+        re.textContent = 'Register';
+        re.onclick = () => route('register');
+        nav.appendChild(li);
+        nav.appendChild(re);
+      }
+    }
+    // Login view
+    function loginView(){
+      app.innerHTML = `
+        <div class="card">
+          <h2>Login</h2>
+          <input id="login-user" placeholder="Username" style="display:block;margin-bottom:6px;padding:6px;border:1px solid var(--g);border-radius:8px;background:#000;color:var(--g);width:100%">
+          <input id="login-pass" type="password" placeholder="Password" style="display:block;margin-bottom:6px;padding:6px;border:1px solid var(--g);border-radius:8px;background:#000;color:var(--g);width:100%">
+          <button class="primary" onclick="login()">Login</button>
+          <p style="margin-top:10px;">New user? <a href="#" onclick="route('register')">Register here</a></p>
+        </div>`;
+    }
+    // Register view
+    function registerView(){
+      app.innerHTML = `
+        <div class="card">
+          <h2>Register</h2>
+          <input id="reg-user" placeholder="Choose username" style="display:block;margin-bottom:6px;padding:6px;border:1px solid var(--g);border-radius:8px;background:#000;color:var(--g);width:100%">
+          <input id="reg-pass" type="password" placeholder="Choose password" style="display:block;margin-bottom:6px;padding:6px;border:1px solid var(--g);border-radius:8px;background:#000;color:var(--g);width:100%">
+          <button class="primary" onclick="register()">Create account</button>
+          <p style="margin-top:10px;">Already have an account? <a href="#" onclick="route('login')">Login</a></p>
+        </div>`;
+    }
+    window.loginView = loginView;
+    window.registerView = registerView;
+    // Perform login
+    window.login = function(){
+      const u = document.getElementById('login-user').value.trim();
+      const p = document.getElementById('login-pass').value;
+      if(!u || !p){ alert('Please enter username and password'); return; }
+      if(!users[u] || users[u].password !== p){
+        alert('Invalid username or password');
+        return;
+      }
+      auth.currentUser = u;
+      state = users[u].state || { progress:{}, labScores:{}, examScores:{}, quizScores:{}, certificates:[], subscription:{tier:'free'} };
+      save();
+      updateNav();
+      route('home');
+    };
+    // Perform registration
+    window.register = function(){
+      const u = document.getElementById('reg-user').value.trim();
+      const p = document.getElementById('reg-pass').value;
+      if(!u || !p){ alert('Please enter username and password'); return; }
+      if(users[u]){ alert('Username already exists'); return; }
+      users[u] = { password: p, state: { progress:{}, labScores:{}, examScores:{}, quizScores:{}, certificates:[], subscription:{tier:'free'} } };
+      localStorage.setItem('usersData', JSON.stringify(users));
+      alert('Account created. Please login.');
+      route('login');
+    };
+    // Initialize navigation on script load
+    updateNav();
+    // Auto-load user from previous session if available
+    const savedUser = localStorage.getItem('currentUser');
+    if(savedUser && users[savedUser]){
+      auth.currentUser = savedUser;
+      state = users[savedUser].state || state;
+      updateNav();
+    }
+    // Save current user on unload
+    window.addEventListener('beforeunload', ()=>{
+      if(auth.currentUser){
+        localStorage.setItem('currentUser', auth.currentUser);
+      }
+    });
+
+    // If no user is logged in, display the login view immediately
+    if(!auth.currentUser){
+      loginView();
+    }
+    // Expose auth object globally so certificate generator can access currentUser
+    window.auth = auth;
+
+    // ---------- Quiz Engine ----------
+    if(!state.quizScores) state.quizScores = {};
+    function quizView(ci, li){
+      const lesson = COURSES[ci].lessons[li];
+      const quiz = lesson.quiz;
+      if(!quiz){ return; }
+      let html = '<div class="card"><h2>Quiz: '+esc(lesson.title)+'</h2>';
+      quiz.forEach((q,i)=>{
+        html += '<p>'+esc(q.q)+'<br>'+q.options.map((o,j)=>`<label><input type="radio" name="quiz${i}" value="${j}">${esc(o)}</label>`).join('<br>')+'</p>';
+      });
+      html += '<button class="primary" onclick="submitQuiz('+ci+','+li+')">Submit Quiz</button>';
+      html += '</div>';
+      app.innerHTML = html;
+    }
+    window.quizView = quizView;
+    window.submitQuiz = function(ci, li){
+      const lesson = COURSES[ci].lessons[li];
+      const quiz = lesson.quiz;
+      let score = 0;
+      quiz.forEach((q,i)=>{
+        const r = document.querySelector('input[name=quiz'+i+']:checked');
+        if(r && +r.value === q.c) score++;
+      });
+      const percent = Math.round((score / quiz.length) * 100);
+      state.quizScores[lesson.key] = { score: percent, passed: percent >= 70 };
+      save();
+      alert('Quiz completed. Score: '+percent+'%');
+      // Return to lesson view
+      lessonView(ci, li);
+    };
+    // Override lessonView to inject quiz and page navigation
+    const oldLessonView = window.lessonView;
+    window.lessonView = function(ci, li){
+      oldLessonView(ci, li);
+      const lesson = COURSES[ci].lessons[li];
+      // Insert quiz button if quiz exists
+      if(lesson.quiz){
+        const card = app.querySelector('.card');
+        if(card){
+          const btn = document.createElement('button');
+          btn.className = 'primary';
+          btn.textContent = 'Take Quiz';
+          btn.style.marginTop = '8px';
+          btn.onclick = () => quizView(ci, li);
+          card.appendChild(btn);
+        }
+      }
+      // Handle multi-page navigation
+      if(lesson.pages && lesson.pages.length > 1){
+        // Locate the first paragraph inside the card
+        const pTag = app.querySelector('.card p');
+        if(pTag){
+          let pageIndex = 0;
+          pTag.innerHTML = esc(lesson.pages[pageIndex]);
+          const navDiv = document.createElement('div');
+          navDiv.style.marginTop = '8px';
+          const prevBtn = document.createElement('button');
+          prevBtn.className = 'primary';
+          prevBtn.textContent = 'Previous';
+          prevBtn.disabled = true;
+          const nextBtn = document.createElement('button');
+          nextBtn.className = 'primary';
+          nextBtn.textContent = 'Next';
+          navDiv.appendChild(prevBtn);
+          navDiv.appendChild(nextBtn);
+          pTag.parentNode.insertBefore(navDiv, pTag.nextSibling);
+          prevBtn.onclick = () => {
+            if(pageIndex > 0){
+              pageIndex--;
+              pTag.innerHTML = esc(lesson.pages[pageIndex]);
+              nextBtn.disabled = false;
+              if(pageIndex === 0) prevBtn.disabled = true;
+            }
+          };
+          nextBtn.onclick = () => {
+            if(pageIndex < lesson.pages.length - 1){
+              pageIndex++;
+              pTag.innerHTML = esc(lesson.pages[pageIndex]);
+              prevBtn.disabled = false;
+              if(pageIndex === lesson.pages.length - 1) nextBtn.disabled = true;
+            }
+          };
+        }
+      }
+    };
+  })();
+</script>
+<script>
+/* =========================================================
+   ADDITIONAL EDUCATIONAL MATERIALS
+   This script attaches rich lesson plans, study materials,
+   tutorials and additional resources to each lesson in the
+   existing curriculum. It does not replace any existing data
+   or functions. Instead, it augments the COURSES array by
+   adding `lessonPlan`, `moreResources` and `assignments`
+   properties for deeper learning. These properties contain
+   extended text, curated university-level readings, video
+   lectures and recommended textbooks. Feel free to expand
+   the `extras` object below with additional subjects.
+========================================================= */
+(function(){
+  const extras = {
+    // CIA Triad lesson: deeper explanation and coursework
+    cia: {
+      lessonPlan: `### Chapter 1: Introducing the CIA Triad
+Confidentiality, integrity and availability are the foundational principles of information security. This chapter introduces the CIA triad, explaining why protecting data from disclosure, corruption and downtime is critical for any organisation.
+
+### Chapter 2: Confidentiality
+Confidentiality ensures that information is only accessible to authorised users. Techniques include access controls, encryption and network segmentation. You will learn how to implement least‑privilege models and choose the right cryptographic protections.
+
+### Chapter 3: Integrity
+Integrity guarantees that data remains accurate and unaltered. We explore checksums, hashing and digital signatures to detect tampering and preserve trust. Case studies demonstrate how integrity failures can lead to fraud and system compromise.
+
+### Chapter 4: Availability
+Availability ensures that systems and data are accessible when needed. This chapter covers redundancy, backups, disaster recovery and denial‑of‑service mitigation strategies to keep services running even during attacks or outages.
+`,
+      images: [
+        { src: "diagrams/cia.png", alt: "CIA Triad Diagram" }
+      ],
+      moreResources: [
+        { title: "Information Systems for Business: The Security Triad", url: "https://ecampusontario.pressbooks.pub/informationsystemscdn/chapter/8-3-the-information-security-triad/" },
+        { title: "LibreTexts – Information Security Triad", url: "https://workforce.libretexts.org/Bookshelves/Information_Technology/Information_Systems/Information_Systems_for_Business/06:_Information_Systems_Security/6.02:_The_Information_Security_Triad" }
+      ],
+      assignments: [
+        "List three examples of confidentiality, integrity and availability controls in your own organization.",
+        "Discuss how an online exam platform could violate the CIA principles if improperly configured."
+      ],
+      // Comprehension quiz for CIA Triad
+      quiz: [
+        { q: "Which principle ensures information is accessible to authorised users at the right time?", options: ["Confidentiality","Integrity","Availability"], c: 2 },
+        { q: "Reading exam questions by an unauthorized user is a violation of which principle?", options: ["Availability","Integrity","Confidentiality"], c: 2 }
+      ]
+    },
+    // Intermediate security controls: layer defence, IDS/IPS and logging
+    intsec: {
+      lessonPlan: `### Chapter 1: Layered Defence Fundamentals
+Layered defence combines multiple security controls at the network, host and application layers to deter, detect and block attacks. Firewalls, routers and switches enforce segmentation and restrict traffic based on rules. Virtual private networks and TLS encrypt data in transit.
+
+### Chapter 2: IDS and IPS Technologies
+Intrusion detection systems (IDS) and intrusion prevention systems (IPS) monitor traffic patterns and signatures to identify malicious behaviour. This chapter compares signature‑based and anomaly‑based detection and discusses deployment architectures, from host‑based agents to network sensors.
+
+### Chapter 3: Logging and Patch Management
+No defence is complete without visibility and hygiene. Logging provides insight into system activity, enabling early detection of attacks and forensic analysis. Patch management mitigates known vulnerabilities. Students will explore log aggregation, SIEM integration and strategies for timely patching.
+
+### Chapter 4: Designing Secure Networks
+This chapter guides you through designing a secure network architecture incorporating the elements discussed. You will apply defence‑in‑depth, least privilege and fail‑secure principles to build resilient systems and justify control placement.`,
+      moreResources: [
+        { title: "Saylor Academy – Network Security", url: "https://learn.saylor.org/course/view.php?id=279" },
+        { title: "NIST SP 800‑94: IDS/IPS Guide", url: "https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-94.pdf" },
+        { title: "Defense in Depth Strategies (DOE)", url: "https://energy.gov/sites/prod/files/oeprod/DocumentsandMedia/Defense_in_Depth_Strategies.pdf" }
+      ],
+      assignments: [
+        "Design a network diagram that uses firewalls and IDS/IPS to protect a small campus.",
+        "Install an open‑source log management tool (such as the ELK stack) and document which events you would monitor."
+      ],
+      quiz: [
+        { q: "Which device restricts network traffic based on rules?", options: ["Firewall","Web server","Database"], c: 0 },
+        { q: "An intrusion detection system (IDS) does what?", options: ["Blocks traffic","Monitors and logs suspicious traffic","Stores passwords"], c: 1 }
+      ]
+    },
+    // Penetration testing lab: step‑by‑step workflow and reading
+    pentest: {
+      lessonPlan: `### Chapter 1: Planning and Scope
+Penetration testing evaluates the security of systems by simulating an attack. A successful engagement begins with defining the scope, objectives and rules of engagement. Testers must obtain written authorization and clarify which systems and techniques are permitted.
+
+### Chapter 2: Reconnaissance and Scanning
+Reconnaissance identifies targets and gathers information through open‑source intelligence (OSINT), network scanning and enumeration. Tools such as Nmap, Shodan and WHOIS reveal IP ranges, ports, services and potential vulnerabilities.
+
+### Chapter 3: Exploitation and Post‑Exploitation
+Active scanning and exploitation seek to gain access by leveraging discovered vulnerabilities. Once inside, testers maintain persistence, pivot to other systems and attempt privilege escalation. Post‑exploitation activities include data exfiltration and lateral movement.
+
+### Chapter 4: Reporting and Ethics
+After testing, findings are documented with evidence, impact analysis and remediation recommendations. Ethical guidelines require testers to act responsibly, avoid unnecessary disruption and maintain confidentiality. Reporting also includes lessons learned and risk mitigation strategies.`,
+      moreResources: [
+        { title: "UpGuard – What is Penetration Testing?", url: "https://www.upguard.com/blog/penetration-testing" },
+        { title: "NIST SP 800‑115: Technical Guide to Information Security Testing", url: "https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-115.pdf" }
+      ],
+      assignments: [
+        "Create a penetration testing plan for a web application, listing reconnaissance tools, exploitation techniques and reporting criteria.",
+        "Read the OWASP Web Security Testing Guide and summarise the top five test cases relevant to your environment."
+      ],
+      quiz: [
+        { q: "What is the first stage of a penetration test?", options: ["Reporting","Reconnaissance","Exploitation"], c: 1 },
+        { q: "The stage that maintains access and persistence is called:", options: ["Enumeration","Post‑exploitation","Scanning"], c: 1 }
+      ]
+    },
+    // Web application basics: deeper HTML/CSS/JS reading
+    webdev: {
+      lessonPlan: `### Chapter 1: HTML Foundations
+HTML is the markup language that defines the structure of web pages. It uses elements like headings, paragraphs, lists and links to describe content. Semantic HTML improves accessibility and search engine optimisation.
+
+### Chapter 2: Styling with CSS
+CSS controls layout and presentation, separating appearance from structure. Learn how to apply colours, fonts and spacing, and build responsive layouts using Flexbox and CSS Grid.
+
+### Chapter 3: JavaScript and the DOM
+JavaScript adds interactivity by manipulating the Document Object Model (DOM). This chapter introduces variables, control structures and functions, and shows how to handle events and update the DOM in response to user actions.
+
+### Chapter 4: Building Complete Web Pages
+Combine HTML, CSS and JavaScript to build interactive pages. Practise creating forms, embedding media and integrating APIs. By the end of this chapter, you will have a personal portfolio site.`,
+      moreResources: [
+        { title: "MDN – HTML Introduction", url: "https://developer.mozilla.org/en-US/docs/Web/HTML" },
+        { title: "Open Technical Communication – HTML Basics", url: "https://opentextbc.ca/technicalwriting/chapter/chapter-9-html-basics/" }
+      ],
+      assignments: [
+        "Build a personal portfolio page using semantic HTML and CSS Grid.",
+        "Write a short article on the benefits of separating content (HTML) from presentation (CSS) and behaviour (JS)."
+      ],
+      quiz: [
+        { q: "Which language defines the structure of a web page?", options: ["HTML","CSS","JavaScript"], c: 0 },
+        { q: "Which HTML tag creates a hyperlink?", options: ["<a>","<div>","<p>"], c: 0 }
+      ]
+    },
+    // Intermediate JavaScript patterns: closures, modules and async
+    intjs: {
+      lessonPlan: `### Chapter 1: Closures and Lexical Scope
+Closures allow a function to access variables from its lexical scope even after the outer function has returned【810578741493932†L176-L180】. Understanding lexical scoping and closures enables encapsulation and data privacy.
+
+### Chapter 2: Module Patterns and Encapsulation
+Modules organise code into reusable units, reducing global namespace pollution. Explore revealing module patterns and ES6 modules to structure applications and manage dependencies.
+
+### Chapter 3: Promises and Async/Await
+JavaScript’s async/await syntax wraps asynchronous operations in a more readable form: async functions return promises and await pauses execution until the promise resolves【510976118434580†L53-L87】. Learn how to convert callback-based functions into promise-based APIs.
+
+### Chapter 4: Advanced Patterns and Best Practices
+Build on your knowledge by studying currying, memoization and event delegation. Mastery of these patterns enables clean, maintainable code in complex applications.`,
+      moreResources: [
+        { title: "MDN – Functions and Closures", url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Closures" },
+        { title: "JavaScript.Info – Modules", url: "https://javascript.info/modules" },
+        { title: "JavaScript.Info – Async/Await", url: "https://javascript.info/async-await" }
+      ],
+      assignments: [
+        "Implement a counter module using closures to encapsulate private state.",
+        "Rewrite a callback-based function to use async/await, and explain the benefits."
+      ],
+      quiz: [
+        { q: "Closures allow a function to ...", options: ["Access only global variables","Access variables from its outer scope","Create classes"], c: 1 },
+        { q: "Which keyword declares an asynchronous function?", options: ["async","await","function"], c: 0 }
+      ]
+    },
+    // Static analysis: deeper explanation and resources
+    re: {
+      lessonPlan: `### Chapter 1: Introduction to Static Analysis
+Static analysis inspects executable files without running them. It avoids the risk of executing malware by examining code, file structure and metadata【614388110713831†L194-L204】.
+
+### Chapter 2: File Formats and Strings
+Analysts examine Portable Executable (PE) and ELF file headers, import tables and printable strings to infer program behaviour and locate indicators of compromise.
+
+### Chapter 3: Disassembly and Tools
+Disassemblers like Ghidra and IDA Pro translate machine code into assembly instructions. This chapter introduces these tools and basic navigation techniques.
+
+### Chapter 4: Obfuscation and Evasion
+Malware authors use obfuscation to hide intent. Learn about packing, encryption and anti-disassembly tricks, and explore ways to defeat them.`,
+      moreResources: [
+        { title: "Ghidra User Guide", url: "https://ghidra-sre.org/Documentation.html" },
+        { title: "Practical Malware Analysis – Sample Chapters", url: "https://nostarch.com/download/samples/Practical_Malware_Analysis_Sample.pdf" }
+      ],
+      assignments: [
+        "Download a benign binary sample and extract printable strings using the strings command; interpret the output.",
+        "Use Ghidra to open a compiled C program and identify the main function."
+      ],
+      quiz: [
+        { q: "Static analysis examines executable code ...", options: ["While running it","Without executing it","By infecting systems"], c: 1 },
+        { q: "Ghidra is a tool for:", options: ["Reverse engineering","Database management","Network scanning"], c: 0 }
+      ]
+    },
+    // Malware analysis basics: importance and practice
+    mal: {
+      lessonPlan: `### Chapter 1: Why Malware Analysis Matters
+Malware analysis helps defenders understand how malicious software works, what vulnerabilities it exploits and how to detect it. Studying malware provides context for incident response and improves defensive strategies.
+
+### Chapter 2: Static vs Dynamic Techniques
+Static analysis observes the code and resources without execution【614388110713831†L194-L204】. Dynamic analysis runs the malware in an isolated sandbox to monitor its behaviour. Learn the benefits and limitations of each approach.
+
+### Chapter 3: Indicators of Compromise and Threat Intelligence
+Analysts document indicators of compromise—hashes, IP addresses, domain names and behavioural patterns—and feed threat intelligence into detection systems【614388110713831†L206-L224】. This chapter shows how to share intelligence across teams and tools.
+
+### Chapter 4: Analysis Workflow and Automation
+Establish a workflow for triaging malware samples, using automation tools to quickly extract metadata and behaviours. Explore open-source sandboxes and dynamic instrumentation tools.`,
+      moreResources: [
+        { title: "Beginner’s Guide to Malware Analysis", url: "https://www.exploit-db.com/docs/english/15587-malware-analysis-beginners.pdf" },
+        { title: "Malware Analysis for Security Analysts (Course)", url: "https://www.cybrary.it/course/malware-analysis" }
+      ],
+      assignments: [
+        "Set up a virtual machine as a malware sandbox and document the steps taken to isolate and monitor the environment.",
+        "Research a real-world malware family and write a short report on its infection vector and behaviour."
+      ],
+      quiz: [
+        { q: "Dynamic analysis ...", options: ["Analyses code without running","Runs malware in a controlled environment","Encrypts files"], c: 1 },
+        { q: "Indicators of compromise are used to ...", options: ["Infect more systems","Identify compromised systems","Obfuscate malware"], c: 1 }
+      ]
+    },
+    // OWASP Top 10: deeper discussion
+    owasp: {
+      lessonPlan: `### Chapter 1: Overview of the OWASP Top 10
+The OWASP Top 10 is a consensus list of the most serious web application security risks【133081879778519†L38-L47】. It highlights causes and impacts, and encourages developers to adopt secure coding practices and threat modelling.
+
+### Chapter 2: Injection and Broken Authentication
+Injection attacks occur when untrusted data is interpreted as code. Broken authentication allows attackers to compromise accounts. Learn about SQL injection, command injection and common authentication failures.
+
+### Chapter 3: Sensitive Data Exposure and Other Risks
+Sensitive data exposure, insecure deserialization, security misconfiguration and insufficient logging are part of the Top 10. Real-world examples illustrate the consequences and remediation.
+
+### Chapter 4: Secure Coding Practices
+This chapter provides guidelines for preventing OWASP Top 10 issues: input validation, parameterized queries, proper session management and rigorous logging. Students should practise identifying vulnerabilities in code and applying fixes.`,
+      moreResources: [
+        { title: "OWASP Top Ten 2021 Overview", url: "https://owasp.org/www-project-top-ten/" },
+        { title: "OWASP Cheat Sheet Series", url: "https://cheatsheetseries.owasp.org" }
+      ],
+      assignments: [
+        "For each category in the OWASP Top 10, find a news article about a breach caused by that vulnerability.",
+        "Perform a code review on a sample application and identify any Top 10 issues."
+      ],
+      quiz: [
+        { q: "The OWASP Top 10 is ...", options: ["A list of programming languages","A consensus document of top web app security risks","A ranking of network devices"], c: 1 },
+        { q: "Which category is part of the OWASP Top 10?", options: ["Injection","Data warehousing","Cloud computing"], c: 0 }
+      ]
+    },
+    // DNS & IP enumeration: details and labs
+    dns: {
+      lessonPlan: `### Chapter 1: Domain Name System Overview
+DNS maps domain names to IP addresses. Understanding DNS record types (A, AAAA, MX, NS, TXT, CNAME) is fundamental to enumeration.
+
+### Chapter 2: Enumeration Techniques
+Attackers map DNS records to reveal subdomains, name servers and host addresses. Passive reconnaissance uses public sources; active queries with dig and host reveal zone contents; zone transfers and brute‑force subdomain enumeration expand the footprint【405440268113230†L37-L68】【405440268113230†L76-L129】.
+
+### Chapter 3: Defensive Measures
+Defenders restrict zone transfers, separate internal and external zones and monitor for enumeration attempts. Learn how to configure DNS servers securely and monitor for misuse.
+
+### Chapter 4: Advanced DNS Operations
+Reverse lookups and DNSSEC introduce additional complexity. Explore how PTR records and DNS security extensions work and consider their impact on enumeration.`,
+      moreResources: [
+        { title: "GeeksforGeeks – DNS Enumeration", url: "https://www.geeksforgeeks.org/dns-enumeration/" },
+        { title: "DNSRecon Tool Guide", url: "https://dnsrecon.readthedocs.io/en/latest/" }
+      ],
+      assignments: [
+        "Use the dig command to query A, MX and NS records for a domain, and interpret the results.",
+        "Attempt a DNS zone transfer on a test domain in a lab environment and document the outcome."
+      ],
+      quiz: [
+        { q: "DNS enumeration aims to ...", options: ["Discover and map DNS records","Encrypt DNS traffic","Delete DNS zones"], c: 0 },
+        { q: "Which tool can perform DNS queries?", options: ["dig","ftp","ssh"], c: 0 }
+      ]
+    },
+    // Authentication logic flaws: deeper coverage
+    auth: {
+      lessonPlan: `### Chapter 1: Common Authentication Vulnerabilities
+Authentication vulnerabilities occur when login and session management mechanisms are incorrectly implemented. Examples include weak password reset functions, predictable session IDs and missing account lockouts【3185380580089†L104-L123】.
+
+### Chapter 2: Secure Authentication Practices
+Secure authentication requires strong password policies, multi-factor authentication and robust session management. Techniques include salted hashing, account lockouts, password reuse prevention and token rotation.
+
+### Chapter 3: Case Studies and Mitigation
+Case studies of authentication failures illustrate the impact of poor controls. Students will analyse breaches and design secure login workflows.
+
+### Chapter 4: Beyond Passwords
+Passwordless authentication, biometric factors and hardware tokens provide alternatives to passwords. Explore the future of authentication and its security implications.`,
+      moreResources: [
+        { title: "PortSwigger – Authentication vulnerabilities", url: "https://portswigger.net/web-security/authentication" },
+        { title: "OWASP Authentication Cheat Sheet", url: "https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html" }
+      ],
+      assignments: [
+        "Review the login flows of an open source application and identify potential flaws.",
+        "Design a password reset mechanism that mitigates enumeration and token reuse attacks."
+      ],
+      quiz: [
+        { q: "Authentication vulnerabilities allow ...", options: ["Attackers to bypass login","Non-critical functions to run","Make the site faster"], c: 0 },
+        { q: "Multi-factor authentication helps to:", options: ["Strengthen authentication","Reuse passwords","Disable account lockouts"], c: 0 }
+      ]
+    },
+    // XSS lab: deeper explanation
+    xss: {
+      lessonPlan: `### Chapter 1: Understanding XSS
+Cross‑Site Scripting occurs when untrusted input is inserted into web pages without proper sanitisation and encoding【61760151186135†L32-L39】【61760151186135†L75-L83】. Attackers execute scripts in a victim’s browser to steal data or perform actions.
+
+### Chapter 2: Types of XSS
+Stored XSS persists in databases and serves malicious scripts to many users. Reflected XSS returns untrusted input immediately in the response. DOM‑based XSS abuses client‑side JavaScript and the DOM.
+
+### Chapter 3: Exploitation Techniques
+Learn how attackers craft payloads to break out of HTML contexts, steal cookies and capture keystrokes. Explore real-world examples and how security tools detect them.
+
+### Chapter 4: Mitigation Strategies
+Defences include output encoding, input validation, secure document APIs and Content Security Policy. This chapter demonstrates implementing a Content-Security-Policy header and context-aware escaping.`,
+      moreResources: [
+        { title: "OWASP – Cross‑Site Scripting (XSS)", url: "https://owasp.org/www-community/attacks/xss/" },
+        { title: "Google Web Fundamentals – XSS Prevention", url: "https://web.dev/security-codelab-xss-auditor/" }
+      ],
+      assignments: [
+        "Write examples of stored, reflected and DOM-based XSS, and demonstrate how to fix each.",
+        "Configure a Content Security Policy for a sample site to mitigate XSS and explain its directives."
+      ],
+      quiz: [
+        { q: "XSS occurs when ...", options: ["Untrusted input is not sanitized","Data is encrypted","Firewalls are misconfigured"], c: 0 },
+        { q: "Which directive helps mitigate XSS by restricting script sources?", options: ["Content-Security-Policy","HTTP/2","JSON Web Token"], c: 0 }
+      ]
+    },
+    // CSRF lab: deeper explanation
+    csrf: {
+      lessonPlan: `### Chapter 1: Understanding CSRF
+Cross‑Site Request Forgery forces a victim’s browser to send unwanted actions to a site where they are authenticated【12857528909017†L162-L170】. CSRF exploits trust in the user’s session identity by embedding malicious requests in emails or third‑party sites.
+
+### Chapter 2: Attack Scenarios
+Attackers craft forms or image requests that automatically submit transactions (e.g., money transfers, email changes). Social engineering lures victims into clicking on malicious pages while logged in.
+
+### Chapter 3: Mitigation Techniques
+Mitigation uses anti‑CSRF tokens, SameSite cookie attributes and double‑submit cookies【12857528909017†L203-L214】. Learn how to implement token validation, verify origins and set the SameSite flag on session cookies.
+
+### Chapter 4: Additional Defences
+User interaction confirmation (e.g., re-entering passwords), CAPTCHA and referrer checking provide layered protections. Understand how user education and safe browsing habits complement technical controls.`,
+      moreResources: [
+        { title: "OWASP – Cross‑Site Request Forgery (CSRF) Prevention", url: "https://owasp.org/www-community/attacks/csrf/" },
+        { title: "OWASP Cheat Sheet – CSRF Prevention", url: "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Request_Forgery_Prevention_Cheat_Sheet.html" }
+      ],
+      assignments: [
+        "Demonstrate a simple CSRF attack on a test application and then implement an anti‑CSRF token defence.",
+        "Explore the impact of SameSite cookie attributes on CSRF mitigation across different browsers."
+      ],
+      quiz: [
+        { q: "CSRF attacks exploit ...", options: ["A victim's authenticated session","Hard drive encryption","CPU performance"], c: 0 },
+        { q: "Anti-CSRF tokens should be included in ...", options: ["State-changing requests","GET requests only","HTML comments"], c: 0 }
+      ]
+    },
+    // Detection & alerting lab
+    detect: {
+      lessonPlan: `### Chapter 1: Introduction to Detection and Monitoring
+Detection and alerting focus on identifying suspicious events and classifying alerts for investigation. Learn about event sources such as logs, network sensors and host agents.
+
+### Chapter 2: Triage and Classification
+Analysts triage alerts to differentiate benign from malicious behaviour. This chapter introduces severity levels, event correlation and prioritization strategies.
+
+### Chapter 3: Escalation and Response
+Effective programmes rely on tuned detection rules, timely escalation and response workflows. Explore how SOCs communicate findings, open tickets and collaborate with incident responders.
+
+### Chapter 4: Tuning Detection and Reducing Noise
+Fine-tuning detection rules and correlation reduces false positives and improves actionable alerts. Learn about signature-based and behaviour-based detection, anomaly detection and continuous improvement.`,
+      moreResources: [
+        { title: "NIST SP 800‑92: Log Management Guide", url: "https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+        { title: "MITRE ATT&CK® – Detection and Analytics", url: "https://attack.mitre.org/resources/detection-management/" }
+      ],
+      assignments: [
+        "Define criteria for a high, medium and low severity alert based on event attributes.",
+        "Use a SIEM tool to create a correlation rule that detects brute force login attempts."
+      ],
+      quiz: [
+        { q: "Detection and alerting systems primarily ...", options: ["Identify and triage suspicious events","Provide file storage","Manage bandwidth"], c: 0 },
+        { q: "Tuning detection rules helps ...", options: ["Reduce false positives","Increase CPU usage","Draw graphics"], c: 0 }
+      ]
+    },
+    // Log analysis lab
+    logs: {
+      lessonPlan: `### Chapter 1: Introduction to Log Analysis
+Log analysis involves aggregating and reviewing event logs to detect patterns and reconstruct incidents. Logs provide insights into user activities, system events and security incidents.
+
+### Chapter 2: Sources of Logs and Parsing
+Identify common sources of logs such as operating systems, applications, firewalls and IDS/IPS. Learn how to parse logs, normalize data and store it in a central repository.
+
+### Chapter 3: Detecting Anomalies and Threats
+Correlating timestamps across systems helps build timelines, while anomaly detection identifies outliers. Use queries and filters to detect failed logins, unusual access patterns and indicators of compromise.
+
+### Chapter 4: Forensics and Compliance
+Effective log management is key for forensics and compliance【265522600141147†L125-L154】. This chapter covers retention policies, chain of custody and evidence preservation.`,
+      moreResources: [
+        { title: "SANS – Enterprise Log Management", url: "https://www.sans.org/security-resources/posters/enterprise_log_management/" },
+        { title: "Elastic – Getting Started with ELK Stack", url: "https://www.elastic.co/guide/en/elastic-stack-get-started/current/get-started-elastic-stack.html" }
+      ],
+      assignments: [
+        "Configure a log forwarder to send system logs to a central server and verify connectivity.",
+        "Analyse a set of web server logs to identify top attack sources and attempted exploits."
+      ],
+      quiz: [
+        { q: "Correlating logs from multiple systems helps ...", options: ["Build timelines of events","Increase storage space","Decrease network latency"], c: 0 },
+        { q: "Anomaly detection in logs is used to ...", options: ["Identify outliers","Format data","Create websites"], c: 0 }
+      ]
+    },
+    // Incident response workflow
+    ir: {
+      lessonPlan: `### Chapter 1: Preparation and Planning
+Incident response follows a life cycle: preparation, detection and analysis, containment, eradication and recovery, and post‑incident activity【770316664622649†L1849-L1852】. Preparation establishes policies, tools and communication channels, assembles response teams and conducts training.
+
+### Chapter 2: Detection and Analysis
+Detection and analysis identify and confirm incidents using logs, monitoring and intrusion detection systems. Analysts triage alerts, determine scope and severity, and gather evidence.
+
+### Chapter 3: Containment, Eradication and Recovery
+Containment and eradication limit damage and remove malicious components. Recovery restores systems and business operations. This chapter covers isolation strategies, remediation and restoring from backups.
+
+### Chapter 4: Post‑Incident Activities
+Post‑incident activities review lessons learned to improve future response. Teams update playbooks, strengthen controls and communicate findings to stakeholders.`,
+      moreResources: [
+        { title: "NIST SP 800‑61r2: Incident Handling Guide", url: "https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-61r2.pdf" },
+        { title: "SANS – Incident Handler’s Handbook", url: "https://www.sans.org/reading-room/whitepapers/incident/incident-handlers-handbook-33901" }
+      ],
+      assignments: [
+        "Develop a communication plan for your incident response team including contact information and reporting channels.",
+        "Create a scenario and outline containment, eradication and recovery steps you would take."
+      ],
+      quiz: [
+        { q: "Which phase follows containment and eradication in the incident response lifecycle?", options: ["Recovery","Preparation","Detection"], c: 0 },
+        { q: "Post-incident activity aims to ...", options: ["Capture lessons learned","Infect other systems","Shut down monitoring"], c: 0 }
+      ]
+    },
+    // JavaScript fundamentals track
+    jsfund: {
+      lessonPlan: `Programming involves constructing instructions for a computer to follow.
+JavaScript provides variables, operators, control structures, functions and objects
+to describe logic and data. Understanding these fundamentals allows you to build
+interactive websites and automate tasks【993223619948568†L14-L48】.`,
+      moreResources: [
+        { title: "Eloquent JavaScript (Online Book)", url: "https://eloquentjavascript.net/" },
+        { title: "MDN JavaScript Guide", url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide" }
+      ],
+      assignments: [
+        "Write a program that prompts the user for two numbers and outputs their sum, difference and product.",
+        "Explain the difference between var, let and const in JavaScript and when to use each."
+      ],
+      quiz: [
+        { q: "Which of the following is NOT a JavaScript data type?", options: ["String","Boolean","Database"], c: 2 },
+        { q: "Which statement is used to loop over an array?", options: ["for","if","return"], c: 0 }
+      ]
+    },
+    // Scripting/automation track
+    auto: {
+      lessonPlan: `Scripting automates repetitive tasks and manipulates data. Python’s
+readability makes it ideal for automating web searches, file operations and
+text processing【978398069403366†L59-L80】. Students will learn to use libraries like
+requests and BeautifulSoup for web scraping, os for file system manipulation and
+pyautogui for controlling the mouse and keyboard.`,
+      moreResources: [
+        { title: "Automate the Boring Stuff with Python (Website)", url: "https://automatetheboringstuff.com" },
+        { title: "Think Python 2nd Edition", url: "https://greenteapress.com/wp/think-python-2e/" }
+      ],
+      assignments: [
+        "Write a Python script that renames all files in a directory based on a pattern.",
+        "Use a Python library to scrape recent news headlines from a website and save them to a CSV file."
+      ],
+      quiz: [
+        { q: "Python's requests library is typically used for ...", options: ["Web scraping and HTTP requests","GUI design","Data encryption"], c: 0 },
+        { q: "Which library allows controlling the mouse and keyboard for automation?", options: ["pyautogui","pandas","matplotlib"], c: 0 }
+      ]
+    },
+    // Script Runner lab
+    scriptrun: {
+      lessonPlan: `The script runner lab encourages hands‑on experimentation with code. You
+can write JavaScript or Python snippets in the sandbox, run them safely and view
+the output. Use this environment to practise fundamental concepts, test library
+functions and solve small programming challenges.`,
+      moreResources: [
+        { title: "Node.js Documentation", url: "https://nodejs.org/en/docs/" },
+        { title: "Python Standard Library Reference", url: "https://docs.python.org/3/library/" }
+      ],
+      assignments: [
+        "Write a script to generate a Fibonacci sequence up to n terms.",
+        "Experiment with file I/O: write code that reads from a text file, modifies the content and writes the result to a new file."
+      ],
+      quiz: [
+        { q: "The script runner lab ...", options: ["Allows you to test code in a sandbox","Connects to remote servers","Installs viruses"], c: 0 },
+        { q: "In the lab, console output is ...", options: ["Captured and displayed","Deleted automatically","Sent to remote server"], c: 0 }
+      ]
+    },
+    // Python fun labs: interactive tasks and textbook-style narrative
+    pyfun: {
+      lessonPlan: `### Chapter 1: Introduction to Python and the REPL
+Python is an interpreted language emphasising readability and rapid development. In this chapter you will install Python, explore the interactive shell (REPL) and write your first scripts. Topics include printing messages, comments, simple arithmetic and using the built‑in help system.
+
+### Chapter 2: Variables, Control Flow and Functions
+Programming is about storing data and making decisions. Learn how to declare variables, assign strings and numbers, and combine them with operators. Then move on to conditionals (if/else), loops (for/while) and functions. You will write your own reusable functions and understand scope and parameters.
+
+### Chapter 3: Data Structures and Comprehensions
+Python provides lists, tuples, sets and dictionaries to organise information. This chapter explores each structure, showing how to add, remove and iterate over elements. You will practise slicing lists, chaining operations with list comprehensions and handling errors with try/except blocks.
+
+### Chapter 4: Object‑Oriented Programming and Modules
+Classes allow you to define your own data types with attributes and methods. Learn how to design classes, initialise objects and override built‑in methods. Finally, discover how to import standard library modules and third‑party packages to extend your programs.`,
+      moreResources: [
+        { title: "Think Python 2e", url: "https://greenteapress.com/wp/think-python-2e/" },
+        { title: "Automate the Boring Stuff with Python (Website)", url: "https://automatetheboringstuff.com" }
+      ],
+      assignments: [
+        "Create a Python script that asks the user for a number and prints whether it is even or odd.",
+        "Write a program that reads a CSV file and prints a list of values from a specified column.",
+        "Define a class Book with title and author properties; create a list of books and print their titles."
+      ],
+      quiz: [
+        { q: "Which symbol starts a comment in Python?", options: ["//","#","<!--"], c: 1 },
+        { q: "List comprehensions are used to ...", options: ["Create classes","Generate lists concisely","Handle errors"], c: 1 }
+      ]
+    },
+    // Defensive Playbook Builder capstone
+    capstone1: {
+      lessonPlan: `A defensive playbook documents step‑by‑step procedures for handling
+specific incident scenarios. It should cover preparation, detection, containment,
+eradication, recovery and post‑incident actions, referencing standards like NIST
+SP 800‑61. The playbook assigns roles and responsibilities, defines escalation
+paths and integrates communication plans.`,
+      moreResources: [
+        { title: "CISA Incident Response Playbook Template", url: "https://www.cisa.gov/sites/default/files/publications/incident-response-playbook-template.pdf" },
+        { title: "NIST SP 800‑61r2", url: "https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-61r2.pdf" }
+      ],
+      assignments: [
+        "Draft a playbook for a ransomware incident, outlining detection, containment, communication and recovery steps.",
+        "Identify the stakeholders who should be notified at each stage of an incident and explain why."
+      ],
+      quiz: [
+        { q: "A defensive playbook should include ...", options: ["Detection, containment, recovery, and post-incident actions","UI design guidelines","Marketing strategies"], c: 0 },
+        { q: "Incident response phases include ...", options: ["Preparation, detection & analysis, containment, eradication & recovery, post-incident activity","Development, staging, marketing, distribution","Implementation, evaluation, termination"], c: 0 }
+      ]
+    },
+    // Secure App Review capstone
+    capstone2: {
+      lessonPlan: `Secure code review systematically evaluates software for vulnerabilities
+before deployment. Reviewers check for issues in authentication, authorisation,
+input validation, session management and secure deployment. Using checklists
+based on the OWASP Top 10 helps ensure comprehensive coverage.`,
+      moreResources: [
+        { title: "OWASP Code Review Guide", url: "https://owasp.org/www-project-code-review-guide/" },
+        { title: "OWASP Secure Coding Practices Quick Reference", url: "https://owasp.org/www-pdf-archive/SCP_Quick_Reference_Guide_v2.pdf" }
+      ],
+      assignments: [
+        "Perform a code review of a small open‑source project and document findings using the OWASP checklist.",
+        "Develop a template for secure code review reports that includes summary, issues and remediation recommendations."
+      ],
+      quiz: [
+        { q: "Secure code review focuses on ...", options: ["Identifying vulnerabilities like injection and authentication flaws","Changing design colors","Duplicating features"], c: 0 },
+        { q: "Which organization provides secure coding guidelines?", options: ["OWASP","IEEE","W3C"], c: 0 }
+      ]
+    },
+    // AI Security Fundamentals lesson enhancements
+    aisec: {
+      lessonPlan: `### Chapter 1: AI Security Fundamentals
+Artificial intelligence systems face unique security challenges. Adversarial inputs, data poisoning, model theft and membership inference attacks can undermine system integrity and confidentiality. Learn the threat landscape and the motivations of attackers.
+
+### Chapter 2: Categories of AI and Threat Models
+AI can be categorised into artificial narrow intelligence (ANI), artificial general intelligence (AGI) and artificial super intelligence (ASI). Each has different capabilities and threat models【808656335810056†L71-L127】. We explore how adversaries might target these systems and the potential impacts on society.
+
+### Chapter 3: AI for Defence
+Machine‑learning models enhance cybersecurity by identifying anomalies, monitoring network traffic, detecting fraud and analysing IoT data【808656335810056†L135-L181】. This chapter highlights defensive use cases and how to integrate AI into security operations.
+
+### Chapter 4: Building Secure AI and Governance
+Secure AI development requires robust data pipelines, threat modelling, adversarial testing and compliance with frameworks such as the NIST AI Risk Management Framework【431080834186883†L70-L99】. We examine best practices for governance, auditing and continuous risk management.`,
+      moreResources: [
+        { title: "AI Security 101 eBook", url: "https://www.practical-devsecops.com/wp-content/uploads/2025/11/AI-Security-E-book-101.pdf" },
+        { title: "AI Threat Taxonomy (NIST) - summary", url: "https://www.nist.gov/itl/ai-risk-management-framework" }
+      ],
+      assignments: [
+        "Summarise the differences between ANI, AGI and ASI and give examples of each.",
+        "Design an adversarial attack scenario on a simple image classifier and describe how you would defend against it.",
+        "Map the stages of an AI/ML pipeline (data collection, preprocessing, training, deployment) and identify security controls at each stage."
+      ],
+      quiz: [
+        { q: "What does AI security aim to protect?", options: ["Only the training data","AI models, data and infrastructure","User interfaces"], c: 1 },
+        { q: "Which category of AI is currently most common?", options: ["ASI","AGI","ANI"], c: 2 },
+        { q: "AI and ML help improve security by ...", options: ["spotting unusual patterns and automating responses","writing user manuals","reducing encryption"], c: 0 }
+      ]
+    },
+    // AI Agents and Large Language Models lesson enhancements
+    agents: {
+      lessonPlan: `### Chapter 1: Transformer Foundations
+Modern language models use tokenisation, embeddings, positional encodings and self‑attention to capture context【539089626921644†L60-L90】. Understand how these components form the backbone of the transformer architecture.
+
+### Chapter 2: Large Language Models in Practice
+Explore how large language models are trained on massive text corpora and fine‑tuned for tasks such as chatbots, summarisation, question answering and coding assistants. Discuss limitations like hallucination and data bias.
+
+### Chapter 3: Building AI Agents
+AI agents orchestrate prompts, tools and memory to accomplish tasks. Learn to design an agent that interacts with APIs, calls functions and maintains context across turns.
+
+### Chapter 4: Safety, Ethics and Responsible Deployment
+Generative models can amplify biases and misinformation. This chapter covers ethical considerations, content filtering, guardrails and transparency when deploying AI assistants.`,
+      moreResources: [
+        { title: "RAD Tutorial on Large Language Models", url: "https://radcollaboratory.rutgers.edu/wp-content/uploads/2025/04/RAD-Tutorial-04292025.pdf" },
+        { title: "Transformers: Attention Is All You Need", url: "https://arxiv.org/pdf/1706.03762.pdf" }
+      ],
+      assignments: [
+        "Create a diagram of the transformer architecture showing tokenisation, embeddings, positional encodings and self‑attention.",
+        "Use an open‑source API (e.g. Hugging Face) to build a simple chatbot agent and document how prompts influence output.",
+        "Research one ethical issue associated with generative AI (such as bias, hallucination or misuse) and propose mitigation strategies."
+      ],
+      quiz: [
+        { q: "What component allows transformers to weigh relationships between tokens?", options: ["Recurrence","Self‑attention","Dropout"], c: 1 },
+        { q: "Tokenisation in LLMs means ...", options: ["Splitting text into smaller units","Compressing data","Encrypting messages"], c: 0 }
+      ]
+    },
+    // Data & AI Governance lesson enhancements
+    dataai: {
+      lessonPlan: `### Chapter 1: Data Quality and Governance
+Successful AI solutions depend on high‑quality data pipelines and governance. Data governance ensures data is accurate, complete, well‑documented and used in accordance with policies and regulations. Key practices include data lineage, metadata management, access control and quality monitoring.
+
+### Chapter 2: Building AI Pipelines
+An AI pipeline typically involves data collection, cleaning, feature engineering, model training, evaluation and deployment. Each stage must address privacy concerns and regulatory compliance. This chapter walks through the pipeline stages and highlights best practices.
+
+### Chapter 3: Privacy and Compliance
+Policies such as the General Data Protection Regulation (GDPR) require organisations to protect personal data and enforce consent and minimisation. Learn how to embed privacy by design, anonymisation and secure storage into your pipelines.
+
+### Chapter 4: Governance Frameworks and Standards
+Frameworks and standards, including the NIST AI Risk Management Framework and ISO/IEC 38505, provide guidance for managing AI risks. This chapter explores how organisations can adopt these frameworks to align AI with ethical, legal and societal requirements.`,
+      images: [
+        { src: "diagrams/ai_pipeline.png", alt: "AI pipeline diagram" }
+      ],
+      moreResources: [
+        { title: "NIST AI Risk Management Framework", url: "https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf" },
+        { title: "The Turing Institute – AI Ethics and Governance Introduction", url: "https://www.turing.ac.uk/sites/default/files/2023-12/aieg-ati-ai-ethics-an-intro_1.pdf" }
+      ],
+      assignments: [
+        "Outline the steps of an AI data pipeline for a real‑world use case (e.g. credit scoring) and identify data governance controls at each step.",
+        "Investigate your organisation’s data governance policy and write a summary of how it addresses privacy and accountability.",
+        "Implement a simple data validation script that checks for missing or malformed values in a dataset."
+      ],
+      quiz: [
+        { q: "Data governance practices include ...", options: ["Lineage and metadata management","Ignoring data quality","Random sampling"], c: 0 },
+        { q: "Privacy regulations such as GDPR require organisations to ...", options: ["Protect personal data and obtain consent","Publish all collected data","Allow unrestricted access"], c: 0 }
+      ]
+    },
+    // AI Ethics & Governance lesson enhancements
+    aiethics: {
+      lessonPlan: `### Chapter 1: Fairness and Bias
+Responsible AI development addresses fairness by ensuring that automated decisions do not discriminate against individuals or groups. Examine sources of bias and techniques to detect and mitigate them.
+
+### Chapter 2: Accountability and Transparency
+Accountability ensures clear lines of responsibility when things go wrong, and transparency requires that stakeholders understand how AI systems make decisions. Explore explainable AI (XAI) methods and auditing practices.
+
+### Chapter 3: Privacy and Safety
+Privacy protects sensitive information through anonymisation, encryption and regulatory compliance. Safety ensures that AI systems are secure and do not cause harm.
+
+### Chapter 4: Governance and Frameworks
+The NIST AI Risk Management Framework emphasises functions such as Govern, Map, Measure and Manage【431080834186883†L70-L99】. This chapter provides frameworks, case studies and tools for ethical AI governance.`,
+      moreResources: [
+        { title: "NIST AI RMF – Governance Function", url: "https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf" },
+        { title: "AI Ethics & Governance Introduction", url: "https://www.turing.ac.uk/sites/default/files/2023-12/aieg-ati-ai-ethics-an-intro_1.pdf" }
+      ],
+      assignments: [
+        "Draft an AI ethics policy for a healthcare application, addressing fairness, accountability, transparency and privacy.",
+        "Analyse a reported incident involving AI (e.g. biased facial recognition) and identify which ethical principles were violated and how they could be mitigated.",
+        "Develop a risk register that lists potential AI risks and maps them to mitigation controls."
+      ],
+      quiz: [
+        { q: "Which principle ensures that stakeholders can understand and contest AI decisions?", options: ["Transparency","Efficiency","Repetition"], c: 0 },
+        { q: "The NIST AI RMF includes which core functions?", options: ["Govern, Map, Measure and Manage","Plan, Do, Check, Act","Research, Develop, Deploy"], c: 0 }
+      ]
+    },
+    // AI Technical Lab extras
+    ai_lab: {
+      lessonPlan: `This lab provides practical experience with AI APIs and pre‑trained models. You will begin by using a sentiment analysis API to classify the tone of text. Next you will practise prompt engineering by crafting effective inputs for a chatbot model. Finally you will evaluate the model’s output for accuracy and bias and document your observations.`,
+      moreResources: [
+        { title: "Hands‑On Machine Learning (sample chapter)", url: "https://github.com/ageron/handson-ml/raw/master/chapter1.pdf" },
+        { title: "Prompt Engineering Guide", url: "https://github.com/dair-ai/Prompt-Engineering-Guide" }
+      ],
+      assignments: [
+        "Write three different prompts to summarise the same article and compare the outputs for completeness and bias.",
+        "Use a sentiment analysis API to classify product reviews and visualise the results in a chart.",
+        "Evaluate the ethical implications of using AI-generated content in a professional setting."
+      ],
+      quiz: [
+        { q: "Sentiment analysis models are used to ...", options: ["Determine the emotional tone of text","Encrypt data","Translate languages"], c: 0 },
+        { q: "What is prompt engineering?", options: ["Designing inputs to elicit desired responses","Building neural networks","Compiling code"], c: 0 }
+      ]
+    },
+    // Quantum Computing Basics lesson enhancements
+    quantum: {
+      lessonPlan: `### Chapter 1: Qubits and Superposition
+Quantum computing uses quantum bits (qubits) that can exist in superposition, simultaneously representing 0 and 1. This chapter explains qubit states and how superposition enables quantum parallelism.
+
+### Chapter 2: Quantum Gates and Circuits
+Quantum gates such as the Hadamard, Pauli and CNOT manipulate qubits, and circuits combine gates to perform algorithms. Learn how to read and construct circuit diagrams.
+
+### Chapter 3: Entanglement and Measurement
+Entanglement links qubits so that the state of one depends on another. Understand Bell states, the measurement postulate and how observing a qubit collapses superposition.
+
+### Chapter 4: Quantum Algorithms and Applications
+Applications include Shor’s algorithm for factoring, Grover’s algorithm for search and emerging algorithms for chemistry and optimisation. Explore the current landscape and future potential.`,
+      images: [
+        { src: "diagrams/quantum_circuit.png", alt: "Quantum Circuit Diagram" }
+      ],
+      moreResources: [
+        { title: "Introduction to Quantum Computers", url: "https://help.rc.unc.edu/Assets/New_Course_Material/General_Computing/Introduction_to_Quantum_Computers.pdf" },
+        { title: "Qiskit Textbook (open source)", url: "https://qiskit.org/textbook/preface.html" }
+      ],
+      assignments: [
+        "Write a short essay explaining the difference between classical bits and quantum bits, including examples of superposition and entanglement.",
+        "Research and summarise one quantum algorithm (e.g. Shor’s or Grover’s) and discuss its potential impact.",
+        "Describe three challenges that currently limit the practical deployment of quantum computers."
+      ],
+      quiz: [
+        { q: "What property allows a qubit to be both 0 and 1 at the same time?", options: ["Superposition","Entanglement","Decoherence"], c: 0 },
+        { q: "Which gate creates entanglement between two qubits?", options: ["CNOT","NOT","Hadamard"], c: 0 }
+      ]
+    },
+    // Quantum Programming Lab extras
+    q_lab: {
+      lessonPlan: `In this lab you will design and simulate basic quantum circuits. Begin by creating a single-qubit circuit that applies a Hadamard gate and measures the outcome. Next build a two-qubit circuit that uses a CNOT gate to create entanglement. Finally experiment with measuring different qubits and interpret the probabilistic results.`,
+      moreResources: [
+        { title: "Qiskit Tutorial: Quantum Circuits", url: "https://qiskit.org/textbook/ch-labs/" },
+        { title: "Quantum Circuits: Building Blocks", url: "https://help.rc.unc.edu/Assets/New_Course_Material/General_Computing/Introduction_to_Quantum_Computers.pdf" }
+      ],
+      assignments: [
+        "Use a quantum simulator to run a circuit with a Hadamard gate and plot the measurement statistics.",
+        "Implement a Bell state using a Hadamard and a CNOT gate and explain why the qubits become correlated.",
+        "Discuss how noise and decoherence affect quantum circuit results and ways to mitigate them."
+      ],
+      quiz: [
+        { q: "Applying a Hadamard gate to |0> yields ...", options: ["A superposition of |0> and |1>","Just |1>","Just |0>"], c: 0 },
+        { q: "When two qubits are entangled, measurement of one qubit ...", options: ["Determines the state of the other","Has no effect on the other","Destroys both qubits"], c: 0 }
+      ]
+    },
+    // Security Intelligence & SIEM lesson enhancements
+    secintel: {
+      lessonPlan: `### Chapter 1: Introduction to Security Intelligence and SIEM
+Security intelligence platforms such as Security Information and Event Management (SIEM) systems centralise log collection, normalisation, correlation and analysis across an organisation. Learn their role in modern security operations【265522600141147†L125-L154】.
+
+### Chapter 2: Log Management and Correlation
+Examine log formats, parsing, normalisation and correlation rules that detect suspicious patterns. Understand how SIEMs produce alerts and dashboards to support investigations.
+
+### Chapter 3: Integrating Threat Intelligence
+Modern threat intelligence combines machine learning and real‑time analytics to identify emerging attacks【591483564769261†L61-L74】. This chapter explores threat feeds, enrichment and collaboration across teams.
+
+### Chapter 4: Trends and Future Directions
+The IBM X‑Force Threat Intelligence Index highlights the increasing sophistication and volume of cyber attacks. Discuss AI‑powered SOCs, SOAR platforms and the evolving landscape of security intelligence.`,
+      moreResources: [
+        { title: "NIST SP 800‑92: Log Management Guide", url: "https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+        { title: "IBM X‑Force Threat Intelligence Index 2025", url: "https://www.bosconsulting.lt/reports/ibm-x-force-threat-intelligence-index-2025-report.pdf" }
+      ],
+      assignments: [
+        "Configure an open-source SIEM (e.g. Wazuh) to ingest and correlate log data from multiple hosts and document the setup steps.",
+        "Review the IBM X‑Force Threat Intelligence Index and identify at least three trends in attacker behaviour; discuss their implications for defenders.",
+        "Develop a simple correlation rule to detect brute-force login attempts and test it in your SIEM."
+      ],
+      quiz: [
+        { q: "The primary purpose of a SIEM is to ...", options: ["Collect, normalise and analyse security logs","Back up databases","Build websites"], c: 0 },
+        { q: "Threat intelligence helps defenders by ...", options: ["Providing real‑time insights into emerging attacks","Writing user manuals","Designing hardware"], c: 0 }
+      ]
+    },
+    // Cyber Security Architecture lesson enhancements
+    arch: {
+      lessonPlan: `### Chapter 1: Principles of Security Architecture
+Security architecture defines the structure and behaviour of an organisation’s security controls across people, processes and technology. Fundamental principles include least privilege, defence in depth, segmentation and redundancy.
+
+### Chapter 2: Frameworks and Methodologies
+Frameworks like SABSA (Sherwood Applied Business Security Architecture), TOGAF and the NIST Cybersecurity Framework provide methodologies for developing architectures aligned with risk management and compliance.
+
+### Chapter 3: Design and Implementation
+Translate business objectives into secure network and system designs. Learn how to build multi‑tier architectures with firewalls, DMZs, zero‑trust networks and high availability.
+
+### Chapter 4: Assessment and Continuous Improvement
+Evaluate architectures through risk assessments, threat modelling and audits. Adapt designs to new threats and organisational changes.`,
+      moreResources: [
+        { title: "NIST Cybersecurity Framework", url: "https://nvlpubs.nist.gov/nistpubs/cswp/nist.cswp.04162018.pdf" },
+        { title: "SABSA Framework Overview", url: "https://sabsa.org/sabsa-framework/" }
+      ],
+      assignments: [
+        "Create a high-level security architecture diagram for a multi-tier web application, labelling components such as firewalls, IDS/IPS, DMZ, application servers and databases.",
+        "Compare the principles of least privilege and separation of duties and provide examples of each in system design.",
+        "Assess your organisation’s architecture against the NIST Cybersecurity Framework and identify gaps."
+      ],
+      quiz: [
+        { q: "Defence in depth means ...", options: ["Layering multiple security controls","Relying on a single firewall","Disabling monitoring"], c: 0 },
+        { q: "Which framework specifically addresses cybersecurity architecture?", options: ["SABSA","Agile","PRINCE2"], c: 0 }
+      ]
+    },
+    // Attack Surface Management lesson enhancements
+    asm: {
+      lessonPlan: `### Chapter 1: Defining the Attack Surface
+Attack surface management (ASM) is the continuous process of discovering, inventorying and reducing an organisation’s exposed digital assets and vulnerabilities. The attack surface includes all possible entry points that an attacker could exploit — web services, APIs, cloud resources, employee devices and third‑party connections.
+
+### Chapter 2: Discovery and Asset Inventory
+Learn techniques for automated asset discovery using tools like Shodan and Censys, vulnerability scanners and OSINT. Maintain an accurate and up‑to‑date asset inventory.
+
+### Chapter 3: Vulnerability Management and Prioritisation
+ASM involves scanning, penetration testing and risk prioritisation. Apply risk scoring to prioritise remediation efforts and track progress.
+
+### Chapter 4: Continuous Monitoring and Reduction
+By continuously monitoring and remediating exposures, organisations reduce the likelihood of breaches and implement zero‑trust principles to minimise exposure.`,
+      moreResources: [
+        { title: "Microsoft Attack Surface Management Overview", url: "https://learn.microsoft.com/en-us/security/attack-surface-management/overview" },
+        { title: "NIST SP 800‑115: Security Testing Guide", url: "https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-115.pdf" }
+      ],
+      assignments: [
+        "Compile a list of your organisation’s publicly exposed assets (domains, IP addresses, cloud services). Use a tool like Shodan or Censys to discover additional assets.",
+        "Perform a vulnerability scan of a small web application and prioritise the findings based on impact and likelihood.",
+        "Develop a remediation plan to reduce the attack surface, including decommissioning unused services and implementing zero‑trust principles."
+      ],
+      quiz: [
+        { q: "The attack surface of an organisation includes ...", options: ["All possible entry points attackers could exploit","Only internal assets","Only web applications"], c: 0 },
+        { q: "Attack surface management should be ...", options: ["Continuous","Annual","Optional"], c: 0 }
+      ]
+    },
+    // SIEM & SOC Lab extras
+    siem: {
+      lessonPlan: `This hands-on lab immerses you in the role of a SOC analyst. First you will ingest logs from multiple sources into a SIEM platform. Next you will write a correlation rule that identifies repeated failed login attempts within a short time window. Finally you will investigate an alert, determine its root cause and produce a report summarising your findings and recommendations.`,
+      moreResources: [
+        { title: "SIEM Implementation Guide", url: "https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf" },
+        { title: "MITRE ATT&CK for SOC Analysts", url: "https://attack.mitre.org/resources/" }
+      ],
+      assignments: [
+        "Install an open-source SIEM and configure it to ingest Windows and Linux logs.",
+        "Write a correlation rule to detect a brute force attack and test it by simulating failed logins.",
+        "Generate an incident report that includes timeline of events, analysis and remediation recommendations."
+      ],
+      quiz: [
+        { q: "What is the final deliverable in this lab?", options: ["An incident report","A new firewall","A marketing plan"], c: 0 },
+        { q: "Correlation rules in SIEMs are used to ...", options: ["Detect patterns across multiple events","Format hard drives","Install software"], c: 0 }
+      ]
+    },
+    // DevOps: ARM & FinOps lesson enhancements
+    arm: {
+      lessonPlan: `### Chapter 1: Infrastructure as Code Foundations
+Infrastructure as Code (IaC) allows you to define cloud resources declaratively using templates. Understand declarative vs imperative approaches and the benefits of IaC for reproducibility and automation.
+
+### Chapter 2: ARM, CloudFormation and Terraform
+Tools such as ARM (Azure Resource Manager), CloudFormation and Terraform help automate deployment and ensure consistency across environments. Compare their features and write basic templates to provision resources.
+
+### Chapter 3: FinOps Principles and Cost Optimisation
+FinOps (Financial Operations) introduces practices for controlling cloud spending by attributing costs, forecasting usage, eliminating waste and negotiating with providers. Learn cost optimisation techniques such as rightsizing and reserved instances.
+
+### Chapter 4: Governance, Policy and Compliance
+Balance technical and financial considerations by implementing governance, policies and role‑based access control. Align IaC with compliance requirements and auditing.`,
+      moreResources: [
+        { title: "Azure ARM Templates Documentation", url: "https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/overview" },
+        { title: "FinOps Foundation – What Is FinOps?", url: "https://www.finops.org/introduction/what-is-finops/" }
+      ],
+      assignments: [
+        "Write an ARM or Terraform template that deploys a virtual machine and a storage account.",
+        "Analyse a month of cloud usage data and identify opportunities to reduce costs (e.g. rightsizing, reserved instances).",
+        "Develop a FinOps policy document that defines tagging standards, cost allocation and budget accountability."
+      ],
+      quiz: [
+        { q: "Infrastructure as Code tools help ...", options: ["Automate deployment of cloud resources","Design user interfaces","Test marketing campaigns"], c: 0 },
+        { q: "FinOps focuses on ...", options: ["Optimising cloud costs","Encrypting data","Writing code in Python"], c: 0 }
+      ]
+    },
+    // DevOps: AIOps & Observability lesson enhancements
+    aiops: {
+      lessonPlan: `### Chapter 1: Observability Principles
+Observability combines telemetry — metrics, logs and traces — to provide deep insight into system behaviour. Understand why observability is essential for troubleshooting and performance management.
+
+### Chapter 2: Machine Learning for Operations
+AIOps uses artificial intelligence to analyse logs, metrics and traces to detect anomalies, predict issues and automate remediation. Explore anomaly detection algorithms and predictive analytics.
+
+### Chapter 3: Automated Remediation and Incident Response
+Learn how event correlation, alerting, auto‑ticketing and self‑healing workflows reduce mean time to resolution. Examine tools that integrate AIOps with IT service management.
+
+### Chapter 4: AIOps in Practice
+Review real‑world case studies where AIOps reduced operational toil and improved reliability. Identify best practices and common pitfalls.`,
+      moreResources: [
+        { title: "Google Cloud AIOps Whitepaper", url: "https://cloud.google.com/files/operations/aiops-for-operations.pdf" },
+        { title: "Observability Engineering Excerpt", url: "https://www.honeycomb.io/resources/observability-engineering-oreilly-excerpt" }
+      ],
+      assignments: [
+        "Deploy an application with monitoring enabled and simulate latency spikes to observe how AIOps detects anomalies.",
+        "Set up logging, metrics and tracing for a microservices application and use an observability platform to investigate a fault.",
+        "Research a case study where AIOps reduced mean time to resolution (MTTR) and summarise the results."
+      ],
+      quiz: [
+        { q: "Observability combines which three pillars?", options: ["Metrics, logs and traces","Files, packets and DNS","Energy, momentum and time"], c: 0 },
+        { q: "AIOps primarily applies ...", options: ["Machine learning to operations data","Marketing techniques","Quantum algorithms"], c: 0 }
+      ]
+    },
+    // API Connect & Data Fabric lesson enhancements
+    apicon: {
+      lessonPlan: `### Chapter 1: API Lifecycle Management
+API management platforms like Apigee and IBM API Connect provide tools to design, secure, publish and monitor APIs. Learn about the API lifecycle from design to retirement and the role of gateways and developer portals.
+
+### Chapter 2: API Design and Documentation
+Good API design follows REST or GraphQL principles, versioning strategies and documentation standards such as OpenAPI/Swagger. Explore best practices for designing and documenting APIs.
+
+### Chapter 3: API Security and Governance
+API security includes authentication, authorisation, rate limiting and encryption. Governance ensures compliance, access control and monetisation.
+
+### Chapter 4: Data Fabric and Hybrid Integration
+Data fabric weaves together data from on‑premises and cloud sources using metadata, machine learning and automation. Learn how data fabrics enable unified access and governance across hybrid environments.`,
+      moreResources: [
+        { title: "Apigee API Management Overview", url: "https://cloud.google.com/apigee/docs/api-platform/overview" },
+        { title: "IBM Data Fabric Overview", url: "https://www.ibm.com/docs/en/cloud-paks/cp-data/4.0?topic=overview-data-fabric" }
+      ],
+      assignments: [
+        "Design an API that exposes data from two microservices; define endpoints, authentication and rate limiting.",
+        "Evaluate a data fabric solution (e.g. DataStax, Denodo or IBM) and write a summary of its features and benefits.",
+        "Create an API documentation page and developer portal entry for your API, including examples and terms of use."
+      ],
+      quiz: [
+        { q: "Which phase of the API lifecycle involves controlling access and usage?", options: ["Secure","Publish","Design"], c: 0 },
+        { q: "A data fabric aims to ...", options: ["Provide unified access to data across environments","Replace all databases","Block API calls"], c: 0 }
+      ]
+    },
+    // Machine Learning Fundamentals and Deep Learning
+    aimodels: {
+      lessonPlan: `### Chapter 1: Introduction to Machine Learning
+Machine learning (ML) is the science of getting computers to act without being explicitly programmed. Supervised learning uses labelled data to train models that map inputs to outputs, while unsupervised learning uncovers hidden structures in unlabeled data. Learn key concepts like training, testing, overfitting and generalisation.
+
+### Chapter 2: Neural Networks and Deep Learning
+Neural networks consist of layers of interconnected neurons that learn hierarchical representations of data. Deep learning uses multiple hidden layers and techniques such as convolution and recurrent architectures to solve complex problems. We explore backpropagation, activation functions and optimisation algorithms.
+
+### Chapter 3: Architectures and Models
+This chapter surveys common architectures including convolutional neural networks (CNNs) for image recognition, recurrent neural networks (RNNs) for sequences and transformers for language modelling. Discuss transfer learning and the role of pre-trained models.
+
+### Chapter 4: Applications and Case Studies
+Review real-world applications in vision, natural language processing, recommendation systems and healthcare. Evaluate the societal impact of ML and consider ethical implications of model deployment.`,
+      moreResources: [
+        { title: "Deep Learning (MIT Press Book)", url: "https://www.deeplearningbook.org/" },
+        { title: "CS229: Machine Learning Course", url: "https://cs229.stanford.edu/" }
+      ],
+      assignments: [
+        "Implement a simple linear regression model using a machine learning library and evaluate its performance on a dataset.",
+        "Compare convolutional and recurrent neural networks by summarising their strengths and typical use cases.",
+        "Research a recent ML application in healthcare or finance and write a short case study highlighting benefits and risks."
+      ],
+      quiz: [
+        { q: "Which learning paradigm uses labelled data?", options: ["Supervised learning","Unsupervised learning","Reinforcement learning"], c: 0 },
+        { q: "What technique allows a model to reuse knowledge from one task on another related task?", options: ["Transfer learning","Gradient descent","Dropout"], c: 0 }
+      ]
+    },
+    // Large Language Models and Chatbots
+    llm: {
+      lessonPlan: `### Chapter 1: Tokenisation, Embeddings and Attention
+Large language models (LLMs) convert text into tokens and embeddings. Positional encodings and self‑attention allow models to capture relationships between words【539089626921644†L60-L90】. Understand these core building blocks.
+
+### Chapter 2: Pretraining and Fine‑Tuning
+LLMs are pretrained on massive text corpora using unsupervised objectives such as next‑word prediction or masked language modelling. Fine‑tuning adapts the model to specific tasks with labelled data. Explore pretraining techniques and the benefits of transfer learning.
+
+### Chapter 3: Generative Tasks and Prompt Engineering
+Models like GPT can generate coherent and contextually relevant text. Learn how to craft prompts, control temperature and avoid hallucination. Discuss evaluation metrics such as BLEU, ROUGE and perplexity.
+
+### Chapter 4: Evaluation, Limitations and Ethics
+Examine challenges like bias, toxic output and misinformation. Explore methods for evaluating model performance, including human evaluation, and discuss mitigation strategies such as instruction tuning and alignment.`,
+      moreResources: [
+        { title: "Attention Is All You Need (Transformer paper)", url: "https://arxiv.org/pdf/1706.03762.pdf" },
+        { title: "Stanford CS324: Large Language Models", url: "https://stanford-cs324.github.io/winter2024/" }
+      ],
+      assignments: [
+        "Fine-tune a small language model on a custom dataset and evaluate its performance.",
+        "Write three different prompts to summarise a news article and compare the outputs for accuracy and bias.",
+        "Discuss the ethical considerations of deploying chatbots in customer service, including handling sensitive information."
+      ],
+      quiz: [
+        { q: "Which component allows a transformer to capture contextual relationships?", options: ["Self‑attention","Pooling layer","ReLU"], c: 0 },
+        { q: "Fine‑tuning adapts a pre‑trained model to ...", options: ["A specific downstream task","General physical simulation","Image compression"], c: 0 }
+      ]
+    },
+    // AI Technical Tutorials
+    aituts: {
+      lessonPlan: `### Chapter 1: Data Preprocessing and Cleaning
+Successful machine learning begins with clean, well‑prepared data. Learn techniques for handling missing values, encoding categorical variables, scaling features and splitting datasets into training and test sets.
+
+### Chapter 2: Feature Engineering and Selection
+Feature engineering creates informative variables from raw data. Explore one‑hot encoding, polynomial features, domain‑specific transformations and dimensionality reduction methods like PCA. Feature selection helps reduce overfitting and improve model interpretability.
+
+### Chapter 3: Model Training and Evaluation
+Train models such as decision trees, SVMs and neural networks. Use cross‑validation to assess performance and choose hyperparameters. Evaluate models using accuracy, precision, recall, F1 score and ROC curves.
+
+### Chapter 4: Deployment and Monitoring
+Learn how to deploy models into production environments using containerisation, APIs and microservices. Monitoring tracks model drift, data quality and performance over time. Implement strategies for continuous learning and retraining.`,
+      moreResources: [
+        { title: "Hands‑On Machine Learning with Scikit‑Learn, Keras & TensorFlow", url: "https://github.com/ageron/handson-ml" },
+        { title: "FastAI Practical Deep Learning for Coders", url: "https://course.fast.ai/" }
+      ],
+      assignments: [
+        "Clean and preprocess a real‑world dataset (e.g. from UCI Machine Learning Repository) and build a classification model.",
+        "Perform principal component analysis (PCA) on a dataset and interpret the principal components.",
+        "Deploy a model as a REST API using Flask or FastAPI and write a script to send requests and log responses."
+      ],
+      quiz: [
+        { q: "One‑hot encoding is used to ...", options: ["Convert categorical variables to binary vectors","Normalize continuous features","Calculate gradients"], c: 0 },
+        { q: "Which metric combines precision and recall into a single value?", options: ["F1 score","Accuracy","R2"], c: 0 }
+      ]
+    },
+    // Quantum Algorithms and Applications
+    q_algorithms: {
+      lessonPlan: `### Chapter 1: Introduction to Quantum Algorithms
+Quantum algorithms leverage quantum mechanical phenomena to solve problems more efficiently than classical algorithms. This chapter introduces algorithmic speedup and complexity classes such as BQP.
+
+### Chapter 2: Shor’s and Grover’s Algorithms
+Shor’s algorithm factors integers in polynomial time using quantum Fourier transforms, threatening RSA cryptography. Grover’s algorithm quadratically speeds up unstructured search. Analyse the steps and circuit structures of these algorithms.
+
+### Chapter 3: Variational and Hybrid Algorithms
+Near‑term quantum devices use hybrid algorithms like the Variational Quantum Eigensolver (VQE) and Quantum Approximate Optimization Algorithm (QAOA), combining classical optimisation with quantum circuits. Explore their use in chemistry and optimisation.
+
+### Chapter 4: Emerging Applications and Complexity
+Discuss quantum algorithms for machine learning, linear systems of equations and simulation. Consider the practical challenges, including error rates and qubit counts, and compare quantum advantage prospects across domains.`,
+      moreResources: [
+        { title: "Qiskit Textbook – Quantum Algorithms", url: "https://qiskit.org/textbook/ch-algorithms/index.html" },
+        { title: "Quantum Algorithm Zoo", url: "https://quantumalgorithmzoo.org/" }
+      ],
+      assignments: [
+        "Implement a toy version of Grover’s algorithm using a quantum simulator and test it on a four‑item search space.",
+        "Write pseudocode for Shor’s algorithm and explain each step in the quantum circuit.",
+        "Research a variational algorithm (VQE or QAOA) and present a report on its application and limitations."
+      ],
+      quiz: [
+        { q: "Grover’s algorithm provides ...", options: ["Quadratic speedup for unstructured search","Exponential speedup for factoring","No advantage over classical"], c: 0 },
+        { q: "Variational algorithms combine quantum circuits with ...", options: ["Classical optimisation routines","Deep neural networks only","Real-time operating systems"], c: 0 }
+      ]
+    },
+    // Quantum Error Correction
+    q_error: {
+      lessonPlan: `### Chapter 1: Noise and Decoherence
+Quantum information is fragile. Qubits are subject to bit‑flip and phase‑flip errors due to noise and decoherence. Understand the physical sources of noise and how they cause loss of coherence.
+
+### Chapter 2: Classical and Quantum Error Correction
+Classical error correction uses redundancy and parity bits to detect and correct errors. Quantum error correction encodes logical qubits into entangled states and uses syndrome measurements to detect errors without collapsing the quantum state.
+
+### Chapter 3: Quantum Codes and Implementations
+Study specific codes such as the 9‑qubit Shor code, the 7‑qubit Steane code and topological surface codes. Explore syndrome extraction circuits and logical operators.
+
+### Chapter 4: Fault‑Tolerant Quantum Computing
+Fault tolerance allows arbitrary long computations despite errors. Learn about threshold theorems, transversal gates and magic state distillation. Discuss the trade‑offs between code distance and resource overhead.`,
+      moreResources: [
+        { title: "Introduction to Quantum Error Correction", url: "https://arxiv.org/pdf/quant-ph/9705031.pdf" },
+        { title: "Surface Codes Tutorial", url: "https://arxiv.org/pdf/1503.08814.pdf" }
+      ],
+      assignments: [
+        "Explain how a 3‑qubit bit‑flip code detects and corrects a single bit‑flip error.",
+        "Design syndrome measurement circuits for a 7‑qubit Steane code and describe the error patterns they detect.",
+        "Discuss the concept of fault‑tolerant gates and why certain gates cannot be implemented transversally."
+      ],
+      quiz: [
+        { q: "Quantum error correction protects against ...", options: ["Noise and decoherence","High voltage spikes","Slow network speed"], c: 0 },
+        { q: "Syndrome measurements are used to ...", options: ["Detect and locate errors","Collapse the wavefunction intentionally","Encrypt data"], c: 0 }
+      ]
+    },
+    // IBM Z Mainframes & Architecture
+    ibmz: {
+      lessonPlan: `### Chapter 1: Evolution of Mainframes
+Mainframes have powered business computing for over half a century. Trace the history from early System/360 models to modern IBM Z systems, highlighting innovations in processing, storage and I/O.
+
+### Chapter 2: Architecture and Virtualisation
+IBM Z architecture features high‑performance processors, extensive parallelism and integrated cryptographic accelerators. Learn how logical partitions (LPARs) and z/VM hypervisor enable virtualisation and workload isolation.
+
+### Chapter 3: Reliability, Availability and Serviceability
+Mainframes are renowned for their RAS characteristics. Explore technologies like dual redundant components, error checking, hot‑swappable modules and dynamic reconfiguration.
+
+### Chapter 4: Modern Use Cases and Hybrid Cloud
+IBM Z now supports Linux, Kubernetes and hybrid cloud integration. Understand how businesses leverage mainframes for high‑value transaction processing, secure data processing and integration with cloud-native services.`,
+      moreResources: [
+        { title: "IBM Z Overview", url: "https://www.ibm.com/docs/en/zos/latest/pdf/ibm-z-overview.pdf" },
+        { title: "Introduction to the New Mainframe: IBM z/OS Basics", url: "https://www.redbooks.ibm.com/redbooks/pdfs/sg247116.pdf" }
+      ],
+      assignments: [
+        "Draw a high‑level diagram of IBM Z architecture showing CPU complexes, LPARs, memory and I/O subsystems.",
+        "Investigate how z/OS and Linux coexist on the same mainframe and discuss the benefits of workload consolidation.",
+        "Research a case study where IBM Z systems are integrated with public cloud services and summarise the architecture."
+      ],
+      quiz: [
+        { q: "Logical partitions (LPARs) on IBM Z ...", options: ["Allow multiple operating systems to run independently","Serve as database servers","Encrypt network traffic"], c: 0 },
+        { q: "Mainframes are known for ...", options: ["High reliability, availability and serviceability","Minimal redundancy and low cost","Gaming performance"], c: 0 }
+      ]
+    },
+    // IBM Power Systems & Virtualization
+    power: {
+      lessonPlan: `### Chapter 1: Power Architecture and Processors
+IBM Power processors are designed for high performance and scalability. Understand the POWER architecture, instruction set and the role of symmetric multiprocessing in Power Systems.
+
+### Chapter 2: Virtualization and Hypervisors
+Technologies like PowerVM and KVM enable partitioning of resources into virtual machines and micro-partitions. Learn about hypervisor features such as dynamic logical partitioning and shared processor pools.
+
+### Chapter 3: High‑Performance and AI Workloads
+Power Systems accelerate AI and high performance computing workloads with features like SMT (simultaneous multithreading), advanced cache hierarchies and hardware accelerators. Explore examples such as IBM PowerAC922 in the Summit supercomputer.
+
+### Chapter 4: Deployment Models and Hybrid Integration
+Examine on‑premises, private cloud and hybrid cloud deployment models. Learn how Power Systems integrate with Kubernetes and OpenShift for modern containerized environments.`,
+      moreResources: [
+        { title: "IBM Power Systems Redbook", url: "https://www.redbooks.ibm.com/redbooks/pdfs/sg248201.pdf" },
+        { title: "PowerVM Virtualization Introduction", url: "https://www.ibm.com/docs/en/powervm" }
+      ],
+      assignments: [
+        "Describe how micro-partitioning differs from logical partitioning and provide use cases for each.",
+        "Research an AI workload (e.g. speech recognition) running on Power Systems and summarise how hardware accelerates the task.",
+        "Deploy a containerised application on an IBM Power environment and document the steps and challenges."
+      ],
+      quiz: [
+        { q: "PowerVM allows ...", options: ["Partitioning resources into virtual machines","Building quantum circuits","Transmitting fibre optics"], c: 0 },
+        { q: "Power processors are designed for ...", options: ["High performance computing and AI workloads","Energy harvesting","Blockchain mining"], c: 0 }
+      ]
+    },
+    // IBM Storage & Backup Solutions
+    ibmstorage: {
+      lessonPlan: `### Chapter 1: Storage Fundamentals and Redundancy
+Reliable storage systems provide redundancy and fault tolerance through RAID levels, mirroring and erasure coding. Understand the trade‑offs between performance, capacity and redundancy.
+
+### Chapter 2: IBM Storage Portfolio
+IBM offers a diverse range of storage solutions including FlashSystem arrays, DS8000 enterprise storage and IBM Storage Scale (Spectrum Scale). Explore their features, such as all‑flash performance, data reduction and multi‑cloud support.
+
+### Chapter 3: Backup and Disaster Recovery
+Backup solutions protect data against loss and corruption. Learn about snapshotting, replication, tape backups and cloud-based disaster recovery. Discuss RPO and RTO objectives and backup architecture design.
+
+### Chapter 4: Next‑Generation Storage and Data Fabric
+Emerging technologies such as NVMe‑over‑Fabrics, computational storage and object stores support data fabric architectures. Understand how data fabrics enable unified access, mobility and governance across hybrid environments.`,
+      moreResources: [
+        { title: "IBM Storage Portfolio Overview", url: "https://www.ibm.com/docs/en/storage" },
+        { title: "IBM Spectrum Scale (Storage Scale) Overview", url: "https://www.ibm.com/products/spectrum-scale" }
+      ],
+      assignments: [
+        "Compare RAID levels (0, 1, 5, 6, 10) and describe which use cases suit each configuration.",
+        "Design a backup and disaster recovery plan for a mid‑size business using IBM storage solutions.",
+        "Research NVMe‑over‑Fabrics and explain how it improves latency and throughput in storage networks."
+      ],
+      quiz: [
+        { q: "RAID 1 provides ...", options: ["Mirroring for redundancy","Striping without parity","Parity for fault tolerance"], c: 0 },
+        { q: "IBM FlashSystem arrays are known for ...", options: ["All‑flash performance and data reduction","Magnetic tape storage","Quantum encryption"], c: 0 }
+      ]
+    }
+  };
+  // Attach the extra materials to the matching lessons by key
+  COURSES.forEach(course => {
+    course.lessons.forEach(lesson => {
+      const extra = extras[lesson.key];
+      if(extra){
+        // Copy extra properties onto the lesson
+        Object.assign(lesson, extra);
+        // If the extra includes a lesson plan, split into pages on blank lines
+        if(extra.lessonPlan){
+          lesson.pages = extra.lessonPlan.trim().split(/\n\s*\n/);
+        }
+        // Attach quiz if provided
+        if(extra.quiz){
+          lesson.quiz = extra.quiz;
+        }
+      }
+    });
+  });
+
+  // On initial load, show the home view
+  if(typeof route === 'function'){
+    route('home');
+  }
+})();
+</script>
+
+</body>
+</html>
+
+<!-- ======================================================
+     Invicta Cyber Solutions — Curriculum Expansion (APPEND ONLY)
+====================================================== -->
+<section id="curriculum-expansion" style="padding:2rem;max-width:1100px;margin:auto">
+<h1>Extended Academic Curriculum</h1>
+<p>This section adds university-grade instructional material, assignments, quizzes, and projects.</p>
+
+<h2>Cybersecurity Foundations</h2>
+<p>Information security protects information assets by balancing confidentiality, integrity, and availability. This chapter explores the economic, technical, and ethical foundations of security.</p>
+
+<h3>Assignments</h3>
+<ul>
+<li>Risk analysis paper (3–5 pages)</li>
+<li>Threat actor modeling exercise</li>
+</ul>
+
+<h2>Python Programming for Security</h2>
+<p>Python enables automation, analysis, and rapid tool development for security professionals.</p>
+
+<h3>Lab</h3>
+<p>Write a Python script that parses authentication logs and detects anomalies.</p>
+
+<h2>Security Architecture</h2>
+<p>Architectural design ensures systems remain secure under attack and failure.</p>
+
+<h2>Capstone Project</h2>
+<p>Design and defend a complete secure system with documentation and response planning.</p>
+</section>
